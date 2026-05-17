@@ -1,0 +1,59 @@
+# =====================================================
+#  .gitignore — FarmCash AI (racine)
+# =====================================================
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code (config locale)
+.claude/
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Dependencies (au cas où un sous-projet n'a pas son propre gitignore)
+node_modules/
+.pnp.*
+
+# Build outputs
+dist/
+build/
+out/
+.next/
+.turbo/
+
+# Tests
+coverage/
+.nyc_output/
+
+# Secrets / env files — JAMAIS commit
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+
+# Volumes / data locales
+*.sqlite
+*.sqlite3
+postgres_data/
+redis_data/
+pgadmin_data/
+minio_data/
+
+# Temp
+.tmp/
+.temp/
+*.tmp

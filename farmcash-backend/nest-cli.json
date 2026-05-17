@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json.schemastore.org/nest-cli",
+  "collection": "@nestjs/schematics",
+  "sourceRoot": "apps/api-gateway/src",
+  "monorepo": true,
+  "root": "apps/api-gateway",
+  "compilerOptions": {
+    "deleteOutDir": true,
+    "webpack": false,
+    "tsConfigPath": "apps/api-gateway/tsconfig.app.json"
+  },
+  "projects": {
+    "api-gateway": {
+      "type": "application",
+      "root": "apps/api-gateway",
+      "entryFile": "main",
+      "sourceRoot": "apps/api-gateway/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/api-gateway/tsconfig.app.json"
+      }
+    },
+    "shared": {
+      "type": "library",
+      "root": "modules/shared",
+      "entryFile": "index",
+      "sourceRoot": "modules/shared/src",
+      "compilerOptions": {
+        "tsConfigPath": "modules/shared/tsconfig.lib.json"
+      }
+    },
+    "database": {
+      "type": "library",
+      "root": "modules/database",
+      "entryFile": "index",
+      "sourceRoot": "modules/database/src",
+      "compilerOptions": {
+        "tsConfigPath": "modules/database/tsconfig.lib.json"
+      }
+    },
+    "auth": {
+      "type": "library",
+      "root": "modules/auth",
+      "entryFile": "index",
+      "sourceRoot": "modules/auth/src",
+      "compilerOptions": {
+        "tsConfigPath": "modules/auth/tsconfig.lib.json"
+      }
+    },
+    "marketplace": {
+      "type": "library",
+      "root": "modules/marketplace",
+      "entryFile": "index",
+      "sourceRoot": "modules/marketplace/src",
+      "compilerOptions": {
+        "tsConfigPath": "modules/marketplace/tsconfig.lib.json"
+      }
+    },
+    "negotiation": {
+      "type": "library",
+      "root": "modules/negotiation",
+      "entryFile": "index",
+      "sourceRoot": "modules/negotiation/src",
+      "compilerOptions": {
+        "tsConfigPath": "modules/negotiation/tsconfig.lib.json"
+      }
+    },
+    "orders": {
+      "type": "library",
+      "root": "modules/orders",
+      "entryFile": "index",
+      "sourceRoot": "modules/orders/src",
+      "compilerOptions": {
+        "tsConfigPath": "modules/orders/tsconfig.lib.json"
+      }
+    },
+    "finance": {
+      "type": "library",
+      "root": "modules/finance",
+      "entryFile": "index",
+      "sourceRoot": "modules/finance/src",
+      "compilerOptions": {
+        "tsConfigPath": "modules/finance/tsconfig.lib.json"
+      }
+    },
+    "logistics": {
+      "type": "library",
+      "root": "modules/logistics",
+      "entryFile": "index",
+      "sourceRoot": "modules/logistics/src",
+      "compilerOptions": {
+        "tsConfigPath": "modules/logistics/tsconfig.lib.json"
+      }
+    },
+    "messaging": {
+      "type": "library",
+      "root": "modules/messaging",
+      "entryFile": "index",
+      "sourceRoot": "modules/messaging/src",
+      "compilerOptions": {
+        "tsConfigPath": "modules/messaging/tsconfig.lib.json"
+      }
+    },
+    "notifications": {
+      "type": "library",
+      "root": "modules/notifications",
+      "entryFile": "index",
+      "sourceRoot": "modules/notifications/src",
+      "compilerOptions": {
+        "tsConfigPath": "modules/notifications/tsconfig.lib.json"
+      }
+    },
+    "ai": {
+      "type": "library",
+      "root": "modules/ai",
+      "entryFile": "index",
+      "sourceRoot": "modules/ai/src",
+      "compilerOptions": {
+        "tsConfigPath": "modules/ai/tsconfig.lib.json"
+      }
+    },
+    "oversight": {
+      "type": "library",
+      "root": "modules/oversight",
+      "entryFile": "index",
+      "sourceRoot": "modules/oversight/src",
+      "compilerOptions": {
+        "tsConfigPath": "modules/oversight/tsconfig.lib.json"
+      }
+    },
+    "cooperatives": {
+      "type": "library",
+      "root": "modules/cooperatives",
+      "entryFile": "index",
+      "sourceRoot": "modules/cooperatives/src",
+      "compilerOptions": {
+        "tsConfigPath": "modules/cooperatives/tsconfig.lib.json"
+      }
+    }
+  }
+}

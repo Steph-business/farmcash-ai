@@ -1,0 +1,25 @@
+{
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "rootDir": "..",
+  "testEnvironment": "node",
+  "testRegex": "test/.*\\.e2e-spec\\.ts$",
+  "transform": {
+    "^.+\\.(t|j)s$": "ts-jest"
+  },
+  "moduleNameMapper": {
+    "^@farmcash/shared(|/.*)$": "<rootDir>/modules/shared/src$1",
+    "^@farmcash/database(|/.*)$": "<rootDir>/modules/database/src$1",
+    "^@farmcash/auth(|/.*)$": "<rootDir>/modules/auth/src$1",
+    "^@farmcash/marketplace(|/.*)$": "<rootDir>/modules/marketplace/src$1",
+    "^@farmcash/negotiation(|/.*)$": "<rootDir>/modules/negotiation/src$1",
+    "^@farmcash/orders(|/.*)$": "<rootDir>/modules/orders/src$1",
+    "^@farmcash/finance(|/.*)$": "<rootDir>/modules/finance/src$1",
+    "^@farmcash/logistics(|/.*)$": "<rootDir>/modules/logistics/src$1",
+    "^@farmcash/messaging(|/.*)$": "<rootDir>/modules/messaging/src$1",
+    "^@farmcash/notifications(|/.*)$": "<rootDir>/modules/notifications/src$1",
+    "^@farmcash/ai(|/.*)$": "<rootDir>/modules/ai/src$1",
+    "^@farmcash/oversight(|/.*)$": "<rootDir>/modules/oversight/src$1",
+    "^@farmcash/cooperatives(|/.*)$": "<rootDir>/modules/cooperatives/src$1"
+  },
+  "testTimeout": 30000
+}

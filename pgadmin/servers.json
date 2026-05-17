@@ -1,0 +1,15 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Farmcash PostgreSQL",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "farmcash_db",
+      "Username": "farmcash_user",
+      "SSLMode": "prefer",
+      "PassFile": "/pgpassfile",
+      "Comment": "Base PostgreSQL FarmCash (réseau Docker interne)"
+    }
+  }
+}

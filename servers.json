@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Farmcash PostgreSQL",
+      "Group": "Farmcash AI",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "farmcash_db",
+      "Username": "farmcash_user",
+      "SSLMode": "prefer",
+      "Comment": "Base de données principale Farmcash (PostGIS 16-3.4). Mot de passe : farmcash_pass_2025"
+    }
+  }
+}

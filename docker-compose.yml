@@ -1,0 +1,158 @@
+version: '3.9'
+ 
+# =================================================================
+#  FARMCASH AI — Environnement de développement local
+#
+#  COMMENT DÉMARRER :
+#    docker compose up -d
+#
+#  COMMENT ARRÊTER (sans perdre les données) :
+#    docker compose stop
+#
+#  COMMENT TOUT SUPPRIMER (données effacées) :
+#    docker compose down -v
+#
+#  ⚠️  IMPORTANT — CONNEXION À POSTGRES :
+#  ------------------------------------------------------------------
+#  • Depuis votre Mac (DBeaver, psql, app locale...) :
+#        Host = localhost     Port = 5433
+#  • Depuis pgAdmin ou un autre conteneur Docker :
+#        Host = postgres      Port = 5432
+#    (le nom "postgres" est le nom du service ci-dessous,
+#     résolu automatiquement par le réseau Docker interne)
+# =================================================================
+ 
+services:
+ 
+  # ---------------------------------------------------------------
+  #  BASE DE DONNÉES — PostgreSQL 16 avec extension PostGIS
+  #  PostGIS permet de stocker des coordonnées GPS et de faire
+  #  des recherches géographiques ("produits à moins de 50km")
+  # ---------------------------------------------------------------
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: farmcash_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       farmcash_db
+      POSTGRES_USER:     farmcash_user
+      POSTGRES_PASSWORD: farmcash_pass_2025
+    ports:
+      - "5433:5432"      # port local (Mac) : port interne (container)
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Ce dossier est exécuté automatiquement au 1er démarrage
+      - ./database/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U farmcash_user -d farmcash_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+ 
+  # ---------------------------------------------------------------
+  #  CACHE & FILES D'ATTENTE — Redis 7
+  #  Utilisé pour : sessions, cache API, jobs asynchrones (Bull)
+  #  et les notifications en temps réel
+  # ---------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: farmcash_redis
+    restart: unless-stopped
+    command: redis-server --requirepass farmcash_redis_2025 --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "farmcash_redis_2025", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+ 
+  # ---------------------------------------------------------------
+  #  INTERFACE VISUELLE POSTGRESQL — pgAdmin 4
+  #  Accès    : http://localhost:5050
+  #  Email    : admin@farmcash.ai
+  #  Password : farmcash_admin_2025
+  #
+  #  Le serveur "Farmcash PostgreSQL" est automatiquement
+  #  pré-enregistré via le fichier ./pgadmin/servers.json.
+  #  Au 1er login, il apparaît déjà dans le panneau de gauche —
+  #  il suffit de double-cliquer et de saisir le mot de passe
+  #  (farmcash_pass_2025).
+  # ---------------------------------------------------------------
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: farmcash_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL:    admin@farmcash.ai
+      PGADMIN_DEFAULT_PASSWORD: farmcash_admin_2025
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      # Pré-enregistrement automatique du serveur PostgreSQL
+      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+ 
+  # ---------------------------------------------------------------
+  #  STOCKAGE FICHIERS — MinIO (compatible Amazon S3)
+  #  Stocke : photos produits, vidéos, documents KYC, certificats
+  #  Console  : http://localhost:9001
+  #  Login    : farmcash_minio / farmcash_minio_2025
+  # ---------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    container_name: farmcash_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER:     farmcash_minio
+      MINIO_ROOT_PASSWORD: farmcash_minio_2025
+    ports:
+      - "9000:9000"   # API S3 (utilisée par le backend)
+      - "9001:9001"   # Interface web
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+ 
+  # ---------------------------------------------------------------
+  #  SERVEUR MAIL DE TEST — Mailhog
+  #  Intercepte tous les emails envoyés par l'app (aucun vrai email)
+  #  Interface : http://localhost:8025
+  # ---------------------------------------------------------------
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: farmcash_mail
+    restart: unless-stopped
+    ports:
+      - "1025:1025"   # SMTP (backend envoie ici)
+      - "8025:8025"   # Interface web pour lire les emails
+ 
+# =================================================================
+#  VOLUMES — données persistantes entre redémarrages
+# =================================================================
+volumes:
+  postgres_data:
+  redis_data:
+  pgadmin_data:
+  minio_data:
+ 
+# =================================================================
+#  RÉSEAU INTERNE — les services se parlent par leur nom
+#  Exemple : le backend se connecte à "postgres:5432"
+#            pgAdmin se connecte à    "postgres:5432"
+# =================================================================
+networks:
+  default:
+    name: farmcash_network
+ 

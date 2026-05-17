@@ -1,0 +1,1794 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis, uuid_ossp(map: "uuid-ossp", schema: "public")]
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model acheteur_profiles {
+  id                String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id           String   @unique @db.Uuid
+  company_name      String?  @db.VarChar(200)
+  numero_rccm       String?  @db.VarChar(100)
+  capacite_achat_kg Decimal? @db.Decimal(12, 2)
+  zones_achat       String[]
+  created_at        DateTime @default(now()) @db.Timestamptz(6)
+  users             users    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model annonces_achat {
+  id                    String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  buyer_id              String                    @db.Uuid
+  produit_id            String?                   @db.Uuid
+  qualite               product_quality?
+  quantite_kg           Decimal                   @db.Decimal(10, 2)
+  prix_max_kg           Decimal?                  @db.Decimal(10, 2)
+  location              Unsupported("geography")?
+  region_id             String?                   @db.Uuid
+  ville_id              String?                   @db.Uuid
+  adresse_detail        String?                   @db.VarChar(200)
+  rayon_km              Int?                      @default(100)
+  date_besoin           DateTime?                 @db.Date
+  is_active             Boolean?                  @default(true)
+  created_at            DateTime                  @default(now()) @db.Timestamptz(6)
+  target_cooperative_id String?                   @db.Uuid
+  target_audience       buy_offer_audience        @default(PUBLIC)
+  users                 users                     @relation(fields: [buyer_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  produits_agricoles    produits_agricoles?       @relation(fields: [produit_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  regions_ci            regions_ci?               @relation(fields: [region_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  cooperative_profiles  cooperative_profiles?     @relation(fields: [target_cooperative_id], references: [id], onUpdate: NoAction, map: "annonces_achat_target_coop_fkey")
+  villes_ci             villes_ci?                @relation(fields: [ville_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  propositions_vente    propositions_vente[]
+  sollicitations_coop   sollicitations_coop[]
+
+  @@index([buyer_id], map: "idx_annonces_achat_buyer")
+  @@index([location], map: "idx_annonces_achat_location", type: Gist)
+  @@index([region_id], map: "idx_annonces_achat_region")
+  @@index([ville_id], map: "idx_annonces_achat_ville")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model annonces_prefinancement {
+  id                          String                        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  farmer_id                   String                        @db.Uuid
+  montant_demande             Decimal                       @db.Decimal(15, 2)
+  objet                       String?
+  produit_id                  String?                       @db.Uuid
+  credit_score                Decimal?                      @db.Decimal(5, 2)
+  statut                      String?                       @default("PENDING") @db.VarChar(30)
+  created_at                  DateTime                      @default(now()) @db.Timestamptz(6)
+  users                       users                         @relation(fields: [farmer_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  produits_agricoles          produits_agricoles?           @relation(fields: [produit_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  candidatures_prefinancement candidatures_prefinancement[]
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model annonces_vente {
+  id                                     String                      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  farmer_id                              String                      @db.Uuid
+  produit_id                             String?                     @db.Uuid
+  qualite                                product_quality             @default(STANDARD)
+  titre                                  String                      @db.VarChar(200)
+  description                            String?
+  quantite_kg                            Decimal                     @db.Decimal(10, 2)
+  prix_par_kg                            Decimal                     @db.Decimal(10, 2)
+  quantite_min_kg                        Decimal                     @default(100) @db.Decimal(10, 2)
+  certifications                         String[]
+  traceability_id                        String?                     @unique @db.VarChar(30)
+  location                               Unsupported("geography")
+  region_id                              String?                     @db.Uuid
+  ville_id                               String?                     @db.Uuid
+  adresse_detail                         String?                     @db.VarChar(200)
+  disponible_jusqu                       DateTime?                   @db.Date
+  status                                 product_status              @default(DRAFT)
+  views_count                            Int                         @default(0)
+  contacts_count                         Int                         @default(0)
+  created_at                             DateTime                    @default(now()) @db.Timestamptz(6)
+  updated_at                             DateTime                    @default(now()) @db.Timestamptz(6)
+  assigned_to_cooperative_id             String?                     @db.Uuid
+  coop_status                            coop_annonce_status?
+  coop_publication_id                    String?                     @db.Uuid
+  quantite_kg_validee                    Decimal?                    @db.Decimal(10, 2)
+  qualite_validee                        product_quality?
+  validee_at                             DateTime?                   @db.Timestamptz(6)
+  validee_by                             String?                     @db.Uuid
+  notes_pesee                            String?
+  rejected_reason                        String?
+  annonce_vente_traitements              annonce_vente_traitements[]
+  cooperative_profiles                   cooperative_profiles?       @relation(fields: [assigned_to_cooperative_id], references: [id], onUpdate: NoAction, map: "annonces_vente_assigned_coop_fkey")
+  publications_stock_coop                publications_stock_coop?    @relation(fields: [coop_publication_id], references: [id], onUpdate: NoAction, map: "annonces_vente_coop_publication_fkey")
+  users                                  users                       @relation(fields: [farmer_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  produits_agricoles                     produits_agricoles?         @relation(fields: [produit_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  regions_ci                             regions_ci?                 @relation(fields: [region_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_annonces_vente_validee_byTousers users?                      @relation("annonces_vente_validee_byTousers", fields: [validee_by], references: [id], onUpdate: NoAction)
+  villes_ci                              villes_ci?                  @relation(fields: [ville_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  candidatures_achat                     candidatures_achat[]
+  commandes_vente                        commandes_vente[]
+  coop_advance_payments                  coop_advance_payments[]
+  favoris                                favoris[]
+  lot_contributions                      lot_contributions[]
+  medias                                 medias[]
+  panier_items                           panier_items[]
+  previsions_production                  previsions_production[]
+  propositions_vente                     propositions_vente[]
+  publication_contributions              publication_contributions[]
+  stock                                  stock[]
+
+  @@index([farmer_id], map: "idx_annonces_farmer")
+  @@index([location], map: "idx_annonces_location", type: Gist)
+  @@index([region_id], map: "idx_annonces_region")
+  @@index([ville_id], map: "idx_annonces_ville")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model avis {
+  id                                 String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  reviewer_id                        String   @db.Uuid
+  reviewed_user_id                   String   @db.Uuid
+  context_type                       String   @db.VarChar(30)
+  context_id                         String?  @db.Uuid
+  note                               Int
+  commentaire                        String?
+  created_at                         DateTime @default(now()) @db.Timestamptz(6)
+  users_avis_reviewed_user_idTousers users    @relation("avis_reviewed_user_idTousers", fields: [reviewed_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_avis_reviewer_idTousers      users    @relation("avis_reviewer_idTousers", fields: [reviewer_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([reviewed_user_id], map: "idx_avis_reviewed")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model candidature_traitements {
+  id                 String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  candidature_id     String             @db.Uuid
+  acteur_id          String             @db.Uuid
+  action             String             @db.VarChar(50)
+  prix_contre_offre  Decimal?           @db.Decimal(10, 2)
+  quantite_kg        Decimal?           @db.Decimal(10, 2)
+  note               String?
+  created_at         DateTime           @default(now()) @db.Timestamptz(6)
+  users              users              @relation(fields: [acteur_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  candidatures_achat candidatures_achat @relation(fields: [candidature_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model candidatures_achat {
+  id                      String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  annonce_id              String                    @db.Uuid
+  buyer_id                String                    @db.Uuid
+  quantite_kg             Decimal                   @db.Decimal(10, 2)
+  prix_propose_kg         Decimal?                  @db.Decimal(10, 2)
+  message                 String?
+  status                  String                    @default("PENDING") @db.VarChar(30)
+  created_at              DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime                  @default(now()) @db.Timestamptz(6)
+  candidature_traitements candidature_traitements[]
+  annonces_vente          annonces_vente            @relation(fields: [annonce_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                   users                     @relation(fields: [buyer_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  negotiation_messages    negotiation_messages[]
+
+  @@index([annonce_id], map: "idx_candidatures_annonce")
+  @@index([buyer_id], map: "idx_candidatures_buyer")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model candidatures_prefinancement {
+  id                      String                  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  annonce_id              String                  @db.Uuid
+  financeur_id            String                  @db.Uuid
+  montant                 Decimal                 @db.Decimal(15, 2)
+  taux_interet            Decimal?                @db.Decimal(5, 2)
+  duree_mois              Int?
+  status                  String?                 @default("PENDING") @db.VarChar(30)
+  created_at              DateTime                @default(now()) @db.Timestamptz(6)
+  annonces_prefinancement annonces_prefinancement @relation(fields: [annonce_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                   users                   @relation(fields: [financeur_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model categories_cultures {
+  id              String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  slug            String            @unique @db.VarChar(30)
+  nom             String            @db.VarChar(100)
+  description     String?
+  icone           String?           @default("ti-leaf") @db.VarChar(50)
+  couleur_hex     String?           @default("#3B6D11") @db.VarChar(7)
+  sort_order      Int?              @default(0)
+  pays_code       String[]          @default(["CI"]) @db.VarChar(5)
+  is_active       Boolean           @default(true)
+  created_at      DateTime          @default(now()) @db.Timestamptz(6)
+  sous_categories sous_categories[]
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model commande_b2b {
+  id                                    String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  offre_id                              String?             @db.Uuid
+  exporter_id                           String              @db.Uuid
+  supplier_id                           String              @db.Uuid
+  produit_id                            String?             @db.Uuid
+  lot_id                                String?             @db.Uuid
+  quantite_kg                           Decimal             @db.Decimal(12, 2)
+  incoterm                              String?             @db.VarChar(10)
+  port_chargement                       String?             @db.VarChar(100)
+  port_destination                      String?             @db.VarChar(100)
+  compagnie                             String?             @db.VarChar(100)
+  tracking_number                       String?             @db.VarChar(100)
+  montant_usd                           Decimal?            @db.Decimal(15, 2)
+  status                                String?             @default("PENDING") @db.VarChar(30)
+  created_at                            DateTime            @default(now()) @db.Timestamptz(6)
+  users_commande_b2b_exporter_idTousers users               @relation("commande_b2b_exporter_idTousers", fields: [exporter_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  lots                                  lots?               @relation(fields: [lot_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  offres_marche_b2b                     offres_marche_b2b?  @relation(fields: [offre_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  produits_agricoles                    produits_agricoles? @relation(fields: [produit_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_commande_b2b_supplier_idTousers users               @relation("commande_b2b_supplier_idTousers", fields: [supplier_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  export_documents                      export_documents[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model commandes_vente {
+  id                                                                                   String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  reference                                                                            String                    @unique @db.VarChar(30)
+  buyer_id                                                                             String                    @db.Uuid
+  seller_id                                                                            String                    @db.Uuid
+  annonce_id                                                                           String?                   @db.Uuid
+  publication_coop_id                                                                  String?                   @db.Uuid
+  lot_id                                                                               String?                   @db.Uuid
+  quantite_kg                                                                          Decimal                   @db.Decimal(10, 2)
+  prix_unitaire_kg                                                                     Decimal                   @db.Decimal(10, 2)
+  montant_total                                                                        Decimal                   @db.Decimal(15, 2)
+  frais_service                                                                        Decimal                   @default(0) @db.Decimal(10, 2)
+  montant_net                                                                          Decimal                   @db.Decimal(15, 2)
+  status                                                                               order_status              @default(SENT)
+  payment_provider                                                                     mobile_provider?
+  escrow_released                                                                      Boolean                   @default(false)
+  delivery_address                                                                     String?
+  delivery_location                                                                    Unsupported("geography")?
+  notes                                                                                String?
+  created_at                                                                           DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at                                                                           DateTime                  @default(now()) @db.Timestamptz(6)
+  idempotency_key                                                                      String?                   @db.VarChar(120)
+  cancelled_at                                                                         DateTime?                 @db.Timestamptz(6)
+  cancelled_reason                                                                     String?                   @db.VarChar(120)
+  from_reservation_id                                                                  String?                   @db.Uuid
+  reservations_previsions_commandes_vente_from_reservation_idToreservations_previsions reservations_previsions?  @relation("commandes_vente_from_reservation_idToreservations_previsions", fields: [from_reservation_id], references: [id], onUpdate: NoAction, map: "commandes_from_reservation_fkey")
+  annonces_vente                                                                       annonces_vente?           @relation(fields: [annonce_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_commandes_vente_buyer_idTousers                                                users                     @relation("commandes_vente_buyer_idTousers", fields: [buyer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  lots                                                                                 lots?                     @relation(fields: [lot_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  publications_stock_coop                                                              publications_stock_coop?  @relation(fields: [publication_coop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_commandes_vente_seller_idTousers                                               users                     @relation("commandes_vente_seller_idTousers", fields: [seller_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  disputes                                                                             disputes[]
+  escrow_conditions                                                                    escrow_conditions[]
+  payout_items                                                                         payout_items[]
+  phone_proxy_sessions                                                                 phone_proxy_sessions[]
+  reservations_previsions                                                              reservations_previsions[]
+  shipments                                                                            shipments[]
+  transactions                                                                         transactions[]
+
+  @@index([buyer_id], map: "idx_commandes_buyer")
+  @@index([seller_id], map: "idx_commandes_seller")
+  @@index([status], map: "idx_commandes_status")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model contrats_vente_coop {
+  id                   String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  cooperative_id       String               @db.Uuid
+  acheteur_id          String               @db.Uuid
+  produit_id           String?              @db.Uuid
+  quantite_kg          Decimal              @db.Decimal(12, 2)
+  prix_kg              Decimal              @db.Decimal(10, 2)
+  date_debut           DateTime?            @db.Date
+  date_fin             DateTime?            @db.Date
+  status               String?              @default("ACTIVE") @db.VarChar(30)
+  doc_url              String?
+  created_at           DateTime             @default(now()) @db.Timestamptz(6)
+  users                users                @relation(fields: [acheteur_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  cooperative_profiles cooperative_profiles @relation(fields: [cooperative_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  produits_agricoles   produits_agricoles?  @relation(fields: [produit_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([cooperative_id], map: "idx_contrats_coop_coop")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model contre_offre_coop_traitements {
+  id                 String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  contre_offre_id    String             @db.Uuid
+  acteur_id          String             @db.Uuid
+  action             String             @db.VarChar(50)
+  prix_contre_offre  Decimal?           @db.Decimal(10, 2)
+  quantite_kg        Decimal?           @db.Decimal(10, 2)
+  note               String?
+  created_at         DateTime           @default(now()) @db.Timestamptz(6)
+  users              users              @relation(fields: [acteur_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  contre_offres_coop contre_offres_coop @relation(fields: [contre_offre_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([contre_offre_id], map: "idx_contre_offre_coop_traitements_co")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model contre_offres_coop {
+  id                            String                          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  publication_id                String                          @db.Uuid
+  acheteur_id                   String                          @db.Uuid
+  cooperative_id                String                          @db.Uuid
+  prix_propose_kg               Decimal                         @db.Decimal(10, 2)
+  quantite_kg                   Decimal                         @db.Decimal(10, 2)
+  message                       String?
+  status                        String                          @default("PENDING") @db.VarChar(30)
+  created_at                    DateTime                        @default(now()) @db.Timestamptz(6)
+  updated_at                    DateTime                        @default(now()) @db.Timestamptz(6)
+  contre_offre_coop_traitements contre_offre_coop_traitements[]
+  users                         users                           @relation(fields: [acheteur_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  cooperative_profiles          cooperative_profiles            @relation(fields: [cooperative_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  publications_stock_coop       publications_stock_coop         @relation(fields: [publication_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  negotiation_messages          negotiation_messages[]
+
+  @@index([acheteur_id], map: "idx_contre_offres_coop_acheteur")
+  @@index([cooperative_id], map: "idx_contre_offres_coop_coop")
+  @@index([publication_id], map: "idx_contre_offres_coop_pub")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model conversation_participants {
+  id              String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  conversation_id String        @db.Uuid
+  user_id         String        @db.Uuid
+  last_read_at    DateTime?     @db.Timestamptz(6)
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  conversations   conversations @relation(fields: [conversation_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users           users         @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([conversation_id, user_id])
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model conversations {
+  id                        String                      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  type                      String                      @default("DIRECT") @db.VarChar(20)
+  titre                     String?                     @db.VarChar(200)
+  is_ai_session             Boolean                     @default(false)
+  ai_context                Json?
+  created_at                DateTime                    @default(now()) @db.Timestamptz(6)
+  last_message_at           DateTime?                   @db.Timestamptz(6)
+  conversation_participants conversation_participants[]
+  messages                  messages[]
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model cooperative_members {
+  id                   String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  cooperative_id       String               @db.Uuid
+  member_id            String               @db.Uuid
+  role_in_coop         String?              @default("MEMBER") @db.VarChar(50)
+  date_adhesion        DateTime?            @db.Date
+  is_active            Boolean?             @default(true)
+  created_at           DateTime             @default(now()) @db.Timestamptz(6)
+  cooperative_profiles cooperative_profiles @relation(fields: [cooperative_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                users                @relation(fields: [member_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([cooperative_id, member_id])
+  @@index([cooperative_id], map: "idx_coop_members_coop")
+  @@index([member_id], map: "idx_coop_members_member")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model cooperative_profiles {
+  id                                               String                     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id                                          String                     @unique @db.Uuid
+  nom                                              String                     @db.VarChar(200)
+  numero_agrement                                  String?                    @db.VarChar(100)
+  region_id                                        String?                    @db.Uuid
+  ville_id                                         String?                    @db.Uuid
+  location                                         Unsupported("geography")?
+  nb_membres                                       Int?                       @default(0)
+  produits                                         String[]
+  created_at                                       DateTime                   @default(now()) @db.Timestamptz(6)
+  commission_rate                                  Decimal                    @default(0.05) @db.Decimal(5, 4)
+  auto_distribute                                  Boolean                    @default(true)
+  president_id                                     String?                    @db.Uuid
+  annonces_achat                                   annonces_achat[]
+  annonces_vente                                   annonces_vente[]
+  contrats_vente_coop                              contrats_vente_coop[]
+  contre_offres_coop                               contre_offres_coop[]
+  coop_advance_payments                            coop_advance_payments[]
+  coop_invitations                                 coop_invitations[]
+  coop_join_requests                               coop_join_requests[]
+  cooperative_members                              cooperative_members[]
+  users_cooperative_profiles_president_idTousers   users?                     @relation("cooperative_profiles_president_idTousers", fields: [president_id], references: [id], onUpdate: NoAction)
+  regions_ci                                       regions_ci?                @relation(fields: [region_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users                                            users                      @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  villes_ci                                        villes_ci?                 @relation(fields: [ville_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  lots                                             lots[]
+  previsions_production                            previsions_production[]
+  producteur_profiles                              producteur_profiles[]
+  publications_stock_coop                          publications_stock_coop[]
+  sollicitation_recipients                         sollicitation_recipients[]
+  sollicitations_coop                              sollicitations_coop[]
+  users_users_cooperative_idTocooperative_profiles users[]                    @relation("users_cooperative_idTocooperative_profiles")
+
+  @@index([region_id], map: "idx_coop_region")
+  @@index([ville_id], map: "idx_coop_ville")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model device_tokens {
+  id         String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id    String   @db.Uuid
+  fcm_token  String
+  platform   String   @db.VarChar(10)
+  is_active  Boolean? @default(true)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  users      users    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([user_id, fcm_token])
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model disputes {
+  id                                String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  commande_id                       String          @db.Uuid
+  opened_by                         String          @db.Uuid
+  raison                            String
+  preuves_urls                      String[]
+  status                            String          @default("OPEN") @db.VarChar(20)
+  resolution                        String?
+  resolved_by                       String?         @db.Uuid
+  resolved_at                       DateTime?       @db.Timestamptz(6)
+  created_at                        DateTime        @default(now()) @db.Timestamptz(6)
+  commandes_vente                   commandes_vente @relation(fields: [commande_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_disputes_opened_byTousers   users           @relation("disputes_opened_byTousers", fields: [opened_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_disputes_resolved_byTousers users?          @relation("disputes_resolved_byTousers", fields: [resolved_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([commande_id], map: "idx_disputes_commande")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model entrepots {
+  id              String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  owner_id        String                    @db.Uuid
+  nom             String                    @db.VarChar(200)
+  location        Unsupported("geography")?
+  region_id       String?                   @db.Uuid
+  ville_id        String?                   @db.Uuid
+  adresse         String?
+  capacite_kg     Decimal?                  @db.Decimal(12, 2)
+  is_refrigere    Boolean?                  @default(false)
+  temperature_min Decimal?                  @db.Decimal(5, 2)
+  temperature_max Decimal?                  @db.Decimal(5, 2)
+  is_active       Boolean?                  @default(true)
+  created_at      DateTime                  @default(now()) @db.Timestamptz(6)
+  users           users                     @relation(fields: [owner_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  regions_ci      regions_ci?               @relation(fields: [region_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  villes_ci       villes_ci?                @relation(fields: [ville_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  stock           stock[]
+
+  @@index([location], map: "idx_entrepots_location", type: Gist)
+  @@index([owner_id], map: "idx_entrepots_owner")
+  @@index([region_id], map: "idx_entrepots_region")
+  @@index([ville_id], map: "idx_entrepots_ville")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model escrow_conditions {
+  id                                            String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  commande_id                                   String          @db.Uuid
+  montant                                       Decimal         @db.Decimal(15, 2)
+  status                                        String          @default("LOCKED") @db.VarChar(20)
+  condition                                     String?
+  locked_at                                     DateTime        @default(now()) @db.Timestamptz(6)
+  released_at                                   DateTime?       @db.Timestamptz(6)
+  released_by                                   String?         @db.Uuid
+  release_reason                                String?
+  kind                                          String          @default("PRODUCT") @db.VarChar(20)
+  beneficiary_id                                String?         @db.Uuid
+  frais_service                                 Decimal         @default(0) @db.Decimal(10, 2)
+  auto_released_on_pickup                       Boolean?        @default(false)
+  users_escrow_conditions_beneficiary_idTousers users?          @relation("escrow_conditions_beneficiary_idTousers", fields: [beneficiary_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  commandes_vente                               commandes_vente @relation(fields: [commande_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                                         users?          @relation(fields: [released_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([commande_id, kind], map: "idx_escrow_commande_kind")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model export_documents {
+  id              String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  commande_b2b_id String       @db.Uuid
+  doc_type        String       @db.VarChar(50)
+  url             String
+  is_validated    Boolean?     @default(false)
+  issued_at       DateTime?    @db.Date
+  expires_at      DateTime?    @db.Date
+  created_at      DateTime     @default(now()) @db.Timestamptz(6)
+  commande_b2b    commande_b2b @relation(fields: [commande_b2b_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model favoris {
+  id             String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id        String         @db.Uuid
+  annonce_id     String         @db.Uuid
+  created_at     DateTime       @default(now()) @db.Timestamptz(6)
+  annonces_vente annonces_vente @relation(fields: [annonce_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users          users          @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([user_id, annonce_id])
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model lot_contributions {
+  id                 String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  lot_id             String                    @db.Uuid
+  farmer_id          String                    @db.Uuid
+  annonce_id         String?                   @db.Uuid
+  quantite_kg        Decimal                   @db.Decimal(10, 2)
+  prix_achat_coop_kg Decimal?                  @db.Decimal(10, 2)
+  qualite            product_quality?
+  date_collecte      DateTime?                 @db.Date
+  farm_location      Unsupported("geography")?
+  notes              String?
+  created_at         DateTime                  @default(now()) @db.Timestamptz(6)
+  annonces_vente     annonces_vente?           @relation(fields: [annonce_id], references: [id], onUpdate: NoAction, map: "fk_lot_contributions_annonce")
+  users              users                     @relation(fields: [farmer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  lots               lots                      @relation(fields: [lot_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  payout_items       payout_items[]
+
+  @@unique([lot_id, farmer_id, annonce_id])
+  @@index([farmer_id], map: "idx_lot_contributions_farmer")
+  @@index([lot_id], map: "idx_lot_contributions_lot")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model lots {
+  id                      String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  lot_code                String                    @unique @db.VarChar(30)
+  type                    String                    @default("INDIVIDUAL") @db.VarChar(15)
+  farmer_id               String?                   @db.Uuid
+  cooperative_id          String?                   @db.Uuid
+  annonce_id              String?                   @db.Uuid
+  publication_id          String?                   @db.Uuid
+  produit_id              String?                   @db.Uuid
+  quantite_kg             Decimal                   @db.Decimal(10, 2)
+  qualite                 product_quality?
+  date_recolte            DateTime?                 @db.Date
+  farm_location           Unsupported("geography")?
+  blockchain_tx           String?                   @db.VarChar(255)
+  created_at              DateTime                  @default(now()) @db.Timestamptz(6)
+  commande_b2b            commande_b2b[]
+  commandes_vente         commandes_vente[]
+  lot_contributions       lot_contributions[]
+  cooperative_profiles    cooperative_profiles?     @relation(fields: [cooperative_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users                   users?                    @relation(fields: [farmer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  produits_agricoles      produits_agricoles?       @relation(fields: [produit_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  publications_stock_coop publications_stock_coop?  @relation(fields: [publication_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  medias                  medias[]
+  stock                   stock[]
+  traceability_events     traceability_events[]
+
+  @@index([produit_id], map: "idx_lots_produit")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model medias {
+  id                      String                   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  annonce_vente_id        String?                  @db.Uuid
+  publication_coop_id     String?                  @db.Uuid
+  lot_id                  String?                  @db.Uuid
+  media_type              String                   @db.VarChar(10)
+  url                     String
+  thumbnail_url           String?
+  sort_order              Int?                     @default(0)
+  created_at              DateTime                 @default(now()) @db.Timestamptz(6)
+  lots                    lots?                    @relation(fields: [lot_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_medias_lot")
+  publications_stock_coop publications_stock_coop? @relation(fields: [publication_coop_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_medias_publication")
+  annonces_vente          annonces_vente?          @relation(fields: [annonce_vente_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model messages {
+  id              String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  conversation_id String        @db.Uuid
+  sender_id       String?       @db.Uuid
+  role            String        @default("user") @db.VarChar(15)
+  content         String
+  media_url       String?
+  media_type      String?       @db.VarChar(20)
+  metadata        Json?
+  status          String?       @default("SENT") @db.VarChar(20)
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  conversations   conversations @relation(fields: [conversation_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users           users?        @relation(fields: [sender_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([conversation_id, created_at(sort: Desc)], map: "idx_messages_conversation")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model moyen_de_payement {
+  id            String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id       String          @db.Uuid
+  provider      mobile_provider
+  phone_display String?         @db.VarChar(30)
+  token         String?
+  is_default    Boolean?        @default(false)
+  is_active     Boolean?        @default(true)
+  created_at    DateTime        @default(now()) @db.Timestamptz(6)
+  users         users           @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model notifications {
+  id                       String                     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id                  String                     @db.Uuid
+  type                     String                     @db.VarChar(50)
+  titre                    String                     @db.VarChar(200)
+  body                     String
+  data                     Json?
+  is_read                  Boolean?                   @default(false)
+  sent_at                  DateTime?                  @db.Timestamptz(6)
+  created_at               DateTime                   @default(now()) @db.Timestamptz(6)
+  users                    users                      @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  sollicitation_recipients sollicitation_recipients[]
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model offres_marche_b2b {
+  id                 String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  exporter_id        String              @db.Uuid
+  produit_id         String?             @db.Uuid
+  quantite_kg        Decimal             @db.Decimal(12, 2)
+  prix_kg_usd        Decimal?            @db.Decimal(10, 4)
+  incoterm           String?             @db.VarChar(10)
+  port_chargement    String?             @db.VarChar(100)
+  port_destination   String?             @db.VarChar(100)
+  is_active          Boolean?            @default(true)
+  created_at         DateTime            @default(now()) @db.Timestamptz(6)
+  commande_b2b       commande_b2b[]
+  users              users               @relation(fields: [exporter_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  produits_agricoles produits_agricoles? @relation(fields: [produit_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model otps {
+  id         String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  phone      String   @db.VarChar(20)
+  code_hash  String   @db.VarChar(255)
+  purpose    String   @db.VarChar(50)
+  is_used    Boolean  @default(false)
+  expires_at DateTime @db.Timestamptz(6)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model outbox_events {
+  id             String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  aggregate_type String    @db.VarChar(50)
+  aggregate_id   String    @db.Uuid
+  event_type     String    @db.VarChar(100)
+  payload        Json
+  status         String    @default("PENDING") @db.VarChar(20)
+  retry_count    Int       @default(0)
+  processed_at   DateTime? @db.Timestamptz(6)
+  error          String?
+  created_at     DateTime  @default(now()) @db.Timestamptz(6)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model panier {
+  id           String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id      String         @unique @db.Uuid
+  created_at   DateTime       @default(now()) @db.Timestamptz(6)
+  users        users          @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  panier_items panier_items[]
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model panier_items {
+  id             String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  panier_id      String         @db.Uuid
+  annonce_id     String         @db.Uuid
+  quantite_kg    Decimal        @db.Decimal(10, 2)
+  prix_unitaire  Decimal        @db.Decimal(10, 2)
+  created_at     DateTime       @default(now()) @db.Timestamptz(6)
+  annonces_vente annonces_vente @relation(fields: [annonce_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  panier         panier         @relation(fields: [panier_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model parcelle {
+  id                    String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id               String                    @db.Uuid
+  nom                   String?                   @db.VarChar(100)
+  contour               Unsupported("geography")?
+  centroid              Unsupported("geography")?
+  superficie_ha         Decimal?                  @db.Decimal(8, 2)
+  produit_id            String?                   @db.Uuid
+  created_at            DateTime                  @default(now()) @db.Timestamptz(6)
+  produits_agricoles    produits_agricoles?       @relation(fields: [produit_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users                 users                     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  plant_analyses        plant_analyses[]
+  previsions_production previsions_production[]
+  user_cultures         user_cultures[]
+
+  @@index([centroid], map: "idx_parcelle_centroid", type: Gist)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model payout_batches {
+  id           String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  initiator_id String         @db.Uuid
+  total_amount Decimal        @db.Decimal(15, 2)
+  nb_items     Int
+  status       String?        @default("PENDING") @db.VarChar(20)
+  executed_at  DateTime?      @db.Timestamptz(6)
+  created_at   DateTime       @default(now()) @db.Timestamptz(6)
+  users        users          @relation(fields: [initiator_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  payout_items payout_items[]
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model payout_items {
+  id                  String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  batch_id            String             @db.Uuid
+  user_id             String             @db.Uuid
+  commande_id         String?            @db.Uuid
+  lot_contribution_id String?            @db.Uuid
+  amount              Decimal            @db.Decimal(15, 2)
+  provider            mobile_provider?
+  provider_ref        String?            @db.VarChar(200)
+  status              String?            @default("PENDING") @db.VarChar(20)
+  created_at          DateTime           @default(now()) @db.Timestamptz(6)
+  payout_batches      payout_batches     @relation(fields: [batch_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  commandes_vente     commandes_vente?   @relation(fields: [commande_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  lot_contributions   lot_contributions? @relation(fields: [lot_contribution_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users               users              @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([commande_id], map: "idx_payout_items_commande")
+  @@index([user_id], map: "idx_payout_items_user")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model plant_analyses {
+  id                 String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  farmer_id          String                    @db.Uuid
+  parcelle_id        String?                   @db.Uuid
+  produit_id         String?                   @db.Uuid
+  image_url          String
+  disease_detected   String?                   @db.VarChar(100)
+  risk_level         String?                   @db.VarChar(10)
+  confidence_score   Decimal?                  @db.Decimal(4, 3)
+  recommendations    Json?
+  location           Unsupported("geography")?
+  model_version      String?                   @db.VarChar(20)
+  created_at         DateTime                  @default(now()) @db.Timestamptz(6)
+  users              users                     @relation(fields: [farmer_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  parcelle           parcelle?                 @relation(fields: [parcelle_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  produits_agricoles produits_agricoles?       @relation(fields: [produit_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([farmer_id], map: "idx_plant_analyses_farmer")
+  @@index([parcelle_id], map: "idx_plant_analyses_parcelle")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model previsions_production {
+  id                                            String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  farmer_id                                     String                    @db.Uuid
+  produit_id                                    String?                   @db.Uuid
+  parcelle_id                                   String?                   @db.Uuid
+  saison                                        String?                   @db.VarChar(20)
+  quantite_prev_kg                              Decimal?                  @db.Decimal(10, 2)
+  date_recolte_prev                             DateTime?                 @db.Date
+  prix_cible_kg                                 Decimal?                  @db.Decimal(10, 2)
+  notes                                         String?
+  created_at                                    DateTime                  @default(now()) @db.Timestamptz(6)
+  assigned_to_cooperative_id                    String?                   @db.Uuid
+  coop_status                                   coop_annonce_status?
+  quantite_kg_validee                           Decimal?                  @db.Decimal(10, 2)
+  validee_at                                    DateTime?                 @db.Timestamptz(6)
+  validee_by                                    String?                   @db.Uuid
+  notes_inspection                              String?
+  rejected_reason                               String?
+  status                                        prevision_status          @default(OPEN)
+  converted_to_annonce_id                       String?                   @db.Uuid
+  converted_at                                  DateTime?                 @db.Timestamptz(6)
+  annonces_vente                                annonces_vente?           @relation(fields: [converted_to_annonce_id], references: [id], onUpdate: NoAction, map: "previsions_converted_annonce_fkey")
+  cooperative_profiles                          cooperative_profiles?     @relation(fields: [assigned_to_cooperative_id], references: [id], onUpdate: NoAction, map: "previsions_production_assigned_coop_fkey")
+  users                                         users                     @relation(fields: [farmer_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  parcelle                                      parcelle?                 @relation(fields: [parcelle_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  produits_agricoles                            produits_agricoles?       @relation(fields: [produit_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_previsions_production_validee_byTousers users?                    @relation("previsions_production_validee_byTousers", fields: [validee_by], references: [id], onUpdate: NoAction)
+  reservations_previsions                       reservations_previsions[]
+
+  @@index([status], map: "idx_previsions_status")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model producteur_profiles {
+  id                   String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id              String                @unique @db.Uuid
+  region_id            String?               @db.Uuid
+  ville_id             String?               @db.Uuid
+  village_libre        String?               @db.VarChar(100)
+  superficie_ha        Decimal?              @db.Decimal(10, 2)
+  nb_annees_exp        Int?
+  cultures_principales String[]
+  est_membre_coop      Boolean?              @default(false)
+  coop_id              String?               @db.Uuid
+  created_at           DateTime              @default(now()) @db.Timestamptz(6)
+  cooperative_profiles cooperative_profiles? @relation(fields: [coop_id], references: [id], onUpdate: NoAction, map: "fk_producteur_coop")
+  regions_ci           regions_ci?           @relation(fields: [region_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users                users                 @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  villes_ci            villes_ci?            @relation(fields: [ville_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([region_id], map: "idx_producteur_region")
+  @@index([ville_id], map: "idx_producteur_ville")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model produits_agricoles {
+  id                      String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  sous_categorie_id       String                    @db.Uuid
+  slug                    String                    @unique @db.VarChar(60)
+  nom                     String                    @db.VarChar(150)
+  nom_local               String?                   @db.VarChar(200)
+  nom_scientifique        String?                   @db.VarChar(200)
+  description             String?
+  unite_mesure            String                    @default("KG") @db.VarChar(10)
+  poids_unitaire_kg       Decimal?                  @db.Decimal(8, 3)
+  prix_marche_min         Decimal?                  @db.Decimal(10, 2)
+  prix_marche_max         Decimal?                  @db.Decimal(10, 2)
+  est_saisonnier          Boolean                   @default(false)
+  saison_debut            String?                   @db.VarChar(20)
+  saison_fin              String?                   @db.VarChar(20)
+  zones_production        String[]
+  est_exportable          Boolean                   @default(false)
+  pays_code               String[]                  @default(["CI"]) @db.VarChar(5)
+  is_active               Boolean                   @default(true)
+  sort_order              Int?                      @default(0)
+  created_at              DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime                  @default(now()) @db.Timestamptz(6)
+  annonces_achat          annonces_achat[]
+  annonces_prefinancement annonces_prefinancement[]
+  annonces_vente          annonces_vente[]
+  commande_b2b            commande_b2b[]
+  contrats_vente_coop     contrats_vente_coop[]
+  lots                    lots[]
+  offres_marche_b2b       offres_marche_b2b[]
+  parcelle                parcelle[]
+  plant_analyses          plant_analyses[]
+  previsions_production   previsions_production[]
+  sous_categories         sous_categories           @relation(fields: [sous_categorie_id], references: [id], onUpdate: NoAction)
+  publications_stock_coop publications_stock_coop[]
+  user_cultures           user_cultures[]
+
+  @@index([pays_code], map: "idx_produits_pays", type: Gin)
+  @@index([slug], map: "idx_produits_slug")
+  @@index([sous_categorie_id], map: "idx_produits_sous_cat")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model produits_traitement {
+  id                           String                         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  nom                          String                         @db.VarChar(200)
+  type                         String?                        @db.VarChar(30)
+  cultures_cibles              String[]
+  maladies_cibles              String[]
+  dosage                       String?
+  mode_application             String?
+  delai_carence_j              Int?
+  created_at                   DateTime                       @default(now()) @db.Timestamptz(6)
+  annonce_vente_traitements    annonce_vente_traitements[]
+  publication_coop_traitements publication_coop_traitements[]
+}
+
+model proposition_traitements {
+  id                 String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  proposition_id     String             @db.Uuid
+  acteur_id          String             @db.Uuid
+  action             String             @db.VarChar(50)
+  prix_contre_offre  Decimal?           @db.Decimal(10, 2)
+  quantite_kg        Decimal?           @db.Decimal(10, 2)
+  note               String?
+  created_at         DateTime           @default(now()) @db.Timestamptz(6)
+  users              users              @relation(fields: [acteur_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  propositions_vente propositions_vente @relation(fields: [proposition_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([proposition_id], map: "idx_proposition_traitements_prop")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model propositions_vente {
+  id                      String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  annonce_achat_id        String                    @db.Uuid
+  vendeur_id              String                    @db.Uuid
+  annonce_vente_id        String?                   @db.Uuid
+  publication_coop_id     String?                   @db.Uuid
+  quantite_kg             Decimal                   @db.Decimal(10, 2)
+  prix_propose_kg         Decimal                   @db.Decimal(10, 2)
+  qualite                 product_quality?          @default(STANDARD)
+  delai_livraison_j       Int?
+  lieu_livraison          String?                   @db.VarChar(200)
+  message                 String?
+  status                  String                    @default("PENDING") @db.VarChar(30)
+  created_at              DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime                  @default(now()) @db.Timestamptz(6)
+  negotiation_messages    negotiation_messages[]
+  proposition_traitements proposition_traitements[]
+  annonces_achat          annonces_achat            @relation(fields: [annonce_achat_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  annonces_vente          annonces_vente?           @relation(fields: [annonce_vente_id], references: [id], onUpdate: NoAction)
+  publications_stock_coop publications_stock_coop?  @relation(fields: [publication_coop_id], references: [id], onUpdate: NoAction)
+  users                   users                     @relation(fields: [vendeur_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([annonce_achat_id], map: "idx_propositions_annonce")
+  @@index([status], map: "idx_propositions_status")
+  @@index([vendeur_id], map: "idx_propositions_vendeur")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model publications_stock_coop {
+  id                           String                         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  cooperative_id               String                         @db.Uuid
+  produit_id                   String?                        @db.Uuid
+  quantite_kg                  Decimal                        @db.Decimal(12, 2)
+  prix_par_kg                  Decimal?                       @db.Decimal(10, 2)
+  qualite                      product_quality?               @default(STANDARD)
+  location                     Unsupported("geography")?
+  region_id                    String?                        @db.Uuid
+  ville_id                     String?                        @db.Uuid
+  adresse_detail               String?                        @db.VarChar(200)
+  is_active                    Boolean?                       @default(true)
+  created_at                   DateTime                       @default(now()) @db.Timestamptz(6)
+  annonces_vente               annonces_vente[]
+  commandes_vente              commandes_vente[]
+  contre_offres_coop           contre_offres_coop[]
+  lots                         lots[]
+  medias                       medias[]
+  propositions_vente           propositions_vente[]
+  publication_contributions    publication_contributions[]
+  publication_coop_traitements publication_coop_traitements[]
+  cooperative_profiles         cooperative_profiles           @relation(fields: [cooperative_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  produits_agricoles           produits_agricoles?            @relation(fields: [produit_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  regions_ci                   regions_ci?                    @relation(fields: [region_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  villes_ci                    villes_ci?                     @relation(fields: [ville_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  stock                        stock[]
+
+  @@index([cooperative_id], map: "idx_publications_coop_cooperative")
+  @@index([location], map: "idx_publications_coop_location", type: Gist)
+  @@index([region_id], map: "idx_publications_coop_region")
+  @@index([ville_id], map: "idx_publications_coop_ville")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model refresh_tokens {
+  id          String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id     String    @db.Uuid
+  token_hash  String    @unique @db.VarChar(255)
+  device_info String?
+  ip_address  String?   @db.Inet
+  expires_at  DateTime  @db.Timestamptz(6)
+  revoked_at  DateTime? @db.Timestamptz(6)
+  created_at  DateTime  @default(now()) @db.Timestamptz(6)
+  users       users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model regions_ci {
+  id                      String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  code                    String                    @unique @db.VarChar(10)
+  nom                     String                    @unique @db.VarChar(100)
+  district                String                    @db.VarChar(100)
+  chef_lieu               String?                   @db.VarChar(100)
+  is_district_autonome    Boolean                   @default(false)
+  centroid                Unsupported("geography")?
+  population              Int?
+  superficie_km2          Decimal?                  @db.Decimal(10, 2)
+  created_at              DateTime                  @default(now()) @db.Timestamptz(6)
+  ai_news                 ai_news[]
+  annonces_achat          annonces_achat[]
+  annonces_vente          annonces_vente[]
+  cooperative_profiles    cooperative_profiles[]
+  entrepots               entrepots[]
+  producteur_profiles     producteur_profiles[]
+  publications_stock_coop publications_stock_coop[]
+  transporteur_profiles   transporteur_profiles[]
+  villes_ci               villes_ci[]
+
+  @@index([district], map: "idx_regions_district")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model reservations_previsions {
+  id                                                                           String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  prevision_id                                                                 String                @db.Uuid
+  acheteur_id                                                                  String                @db.Uuid
+  quantite_kg                                                                  Decimal               @db.Decimal(10, 2)
+  prix_reserve_kg                                                              Decimal?              @db.Decimal(10, 2)
+  status                                                                       String?               @default("PENDING") @db.VarChar(30)
+  created_at                                                                   DateTime              @default(now()) @db.Timestamptz(6)
+  deposit_amount                                                               Decimal               @default(0) @db.Decimal(12, 2)
+  deposit_rate                                                                 Decimal               @default(0.10) @db.Decimal(5, 4)
+  deposit_paid_at                                                              DateTime?             @db.Timestamptz(6)
+  deposit_transaction_id                                                       String?               @db.Uuid
+  final_order_id                                                               String?               @db.Uuid
+  expires_at                                                                   DateTime?             @db.Timestamptz(6)
+  notified_at                                                                  DateTime?             @db.Timestamptz(6)
+  commandes_vente_commandes_vente_from_reservation_idToreservations_previsions commandes_vente[]     @relation("commandes_vente_from_reservation_idToreservations_previsions")
+  transactions                                                                 transactions?         @relation(fields: [deposit_transaction_id], references: [id], onUpdate: NoAction, map: "reservations_deposit_tx_fkey")
+  commandes_vente                                                              commandes_vente?      @relation(fields: [final_order_id], references: [id], onUpdate: NoAction, map: "reservations_final_order_fkey")
+  users                                                                        users                 @relation(fields: [acheteur_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  previsions_production                                                        previsions_production @relation(fields: [prevision_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([status, expires_at], map: "idx_reservations_status_expires")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model shipment_tracking {
+  id          String                   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  shipment_id String                   @db.Uuid
+  location    Unsupported("geography")
+  status      shipment_status?
+  note        String?
+  created_at  DateTime                 @default(now()) @db.Timestamptz(6)
+  shipments   shipments                @relation(fields: [shipment_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([shipment_id, created_at(sort: Desc)], map: "idx_tracking_shipment")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model shipments {
+  id                                       String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  commande_id                              String                    @db.Uuid
+  transporter_id                           String?                   @db.Uuid
+  vehicle_type                             String?                   @db.VarChar(30)
+  pickup_location                          Unsupported("geography")?
+  delivery_location                        Unsupported("geography")?
+  pickup_address                           String?
+  delivery_address                         String
+  scheduled_at                             DateTime?                 @db.Timestamptz(6)
+  prix_devis                               Decimal?                  @db.Decimal(10, 2)
+  prix_final                               Decimal?                  @db.Decimal(10, 2)
+  status                                   shipment_status           @default(REQUESTED)
+  photo_preuve_url                         String?
+  notes                                    String?
+  delivered_at                             DateTime?                 @db.Timestamptz(6)
+  created_at                               DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at                               DateTime                  @default(now()) @db.Timestamptz(6)
+  origin_zone                              String?                   @db.VarChar(100)
+  destination_zone                         String?                   @db.VarChar(100)
+  quantite_kg                              Decimal?                  @db.Decimal(10, 2)
+  pickup_qr_token                          String?                   @db.VarChar(120)
+  pickup_qr_expires_at                     DateTime?                 @db.Timestamptz(6)
+  pickup_scanned_at                        DateTime?                 @db.Timestamptz(6)
+  pickup_scanned_by                        String?                   @db.Uuid
+  shipment_tracking                        shipment_tracking[]
+  commandes_vente                          commandes_vente           @relation(fields: [commande_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_shipments_pickup_scanned_byTousers users?                    @relation("shipments_pickup_scanned_byTousers", fields: [pickup_scanned_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users                                    users?                    @relation(fields: [transporter_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([commande_id], map: "idx_shipments_commande")
+  @@index([transporter_id], map: "idx_shipments_transporter")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model sous_categories {
+  id                  String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  categorie_id        String               @db.Uuid
+  slug                String               @unique @db.VarChar(50)
+  nom                 String               @db.VarChar(100)
+  description         String?
+  sort_order          Int?                 @default(0)
+  is_active           Boolean              @default(true)
+  created_at          DateTime             @default(now()) @db.Timestamptz(6)
+  produits_agricoles  produits_agricoles[]
+  categories_cultures categories_cultures  @relation(fields: [categorie_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model spatial_ref_sys {
+  srid      Int     @id
+  auth_name String? @db.VarChar(256)
+  auth_srid Int?
+  srtext    String? @db.VarChar(2048)
+  proj4text String? @db.VarChar(2048)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model stock {
+  id                      String                   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  entrepot_id             String                   @db.Uuid
+  lot_id                  String?                  @db.Uuid
+  annonce_id              String?                  @db.Uuid
+  publication_coop_id     String?                  @db.Uuid
+  quantite_kg             Decimal                  @db.Decimal(10, 2)
+  date_entree             DateTime?                @db.Date
+  date_sortie_prev        DateTime?                @db.Date
+  notes                   String?
+  created_at              DateTime                 @default(now()) @db.Timestamptz(6)
+  annonces_vente          annonces_vente?          @relation(fields: [annonce_id], references: [id], onUpdate: NoAction)
+  entrepots               entrepots                @relation(fields: [entrepot_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  lots                    lots?                    @relation(fields: [lot_id], references: [id], onUpdate: NoAction)
+  publications_stock_coop publications_stock_coop? @relation(fields: [publication_coop_id], references: [id], onUpdate: NoAction)
+
+  @@index([entrepot_id], map: "idx_stock_entrepot")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model traceability_events {
+  id             String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  lot_id         String                    @db.Uuid
+  event_type     String                    @db.VarChar(30)
+  actor_id       String                    @db.Uuid
+  location       Unsupported("geography")?
+  metadata       Json                      @default("{}")
+  blockchain_tx  String?                   @db.VarChar(255)
+  blockchain_net String?                   @default("POLYGON") @db.VarChar(20)
+  created_at     DateTime                  @default(now()) @db.Timestamptz(6)
+  users          users                     @relation(fields: [actor_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  lots           lots                      @relation(fields: [lot_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([lot_id, created_at], map: "idx_traceability_lot")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model transactions {
+  id                      String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id                 String                    @db.Uuid
+  commande_id             String?                   @db.Uuid
+  type                    String                    @db.VarChar(30)
+  montant                 Decimal                   @db.Decimal(15, 2)
+  balance_avant           Decimal                   @db.Decimal(15, 2)
+  balance_apres           Decimal                   @db.Decimal(15, 2)
+  provider                mobile_provider?
+  provider_ref            String?                   @db.VarChar(200)
+  status                  String                    @default("PENDING") @db.VarChar(20)
+  description             String?
+  created_at              DateTime                  @default(now()) @db.Timestamptz(6)
+  idempotency_key         String?                   @db.VarChar(120)
+  provider_status         String?                   @db.VarChar(30)
+  attempts                Int                       @default(0)
+  last_attempt_at         DateTime?                 @db.Timestamptz(6)
+  failed_reason           String?
+  reservations_previsions reservations_previsions[]
+  commandes_vente         commandes_vente?          @relation(fields: [commande_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users                   users                     @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([commande_id], map: "idx_transactions_commande")
+  @@index([created_at(sort: Desc)], map: "idx_transactions_date")
+  @@index([user_id], map: "idx_transactions_user")
+  @@index([status], map: "idx_transactions_status")
+  @@index([type], map: "idx_transactions_type")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model user_cultures {
+  id                 String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id            String              @db.Uuid
+  produit_id         String?             @db.Uuid
+  superficie_ha      Decimal?            @db.Decimal(8, 2)
+  created_at         DateTime            @default(now()) @db.Timestamptz(6)
+  parcelle_id        String?             @db.Uuid
+  parcelle           parcelle?           @relation(fields: [parcelle_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  produits_agricoles produits_agricoles? @relation(fields: [produit_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users              users               @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model user_documents {
+  id               String     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id          String     @db.Uuid
+  doc_type         String     @db.VarChar(50)
+  doc_url          String
+  status           kyc_status @default(PENDING)
+  rejection_reason String?
+  verified_by      String?    @db.Uuid
+  verified_at      DateTime?  @db.Timestamptz(6)
+  expires_at       DateTime?  @db.Date
+  created_at       DateTime   @default(now()) @db.Timestamptz(6)
+  users            users      @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model user_login_history {
+  id             String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id        String   @db.Uuid
+  ip_address     String?  @db.Inet
+  device_info    String?
+  success        Boolean
+  failure_reason String?  @db.VarChar(100)
+  created_at     DateTime @default(now()) @db.Timestamptz(6)
+  users          users    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model users {
+  id                                                              String                          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  phone                                                           String                          @unique @db.VarChar(20)
+  role                                                            user_role                       @default(FARMER)
+  full_name                                                       String                          @db.VarChar(150)
+  photo_url                                                       String?
+  is_verified                                                     Boolean                         @default(false)
+  is_active                                                       Boolean                         @default(true)
+  rating                                                          Decimal                         @default(0.00) @db.Decimal(3, 2)
+  rating_count                                                    Int                             @default(0)
+  location                                                        Unsupported("geography")?
+  wallet_balance                                                  Decimal                         @default(0.00) @db.Decimal(15, 2)
+  pin_hash                                                        String?                         @db.VarChar(255)
+  langue                                                          String                          @default("fr") @db.VarChar(10)
+  created_at                                                      DateTime                        @default(now()) @db.Timestamptz(6)
+  updated_at                                                      DateTime                        @default(now()) @db.Timestamptz(6)
+  email                                                           String?                         @unique @db.VarChar(150)
+  failed_attempts                                                 Int                             @default(0)
+  locked_until                                                    DateTime?                       @db.Timestamptz(6)
+  last_login                                                      DateTime?                       @db.Timestamptz(6)
+  cooperative_id                                                  String?                         @db.Uuid
+  acheteur_profiles                                               acheteur_profiles?
+  admin_audit_log                                                 admin_audit_log[]
+  admin_profiles                                                  admin_profiles?
+  ai_news                                                         ai_news[]
+  annonces_achat                                                  annonces_achat[]
+  annonces_prefinancement                                         annonces_prefinancement[]
+  annonces_vente                                                  annonces_vente[]
+  annonces_vente_annonces_vente_validee_byTousers                 annonces_vente[]                @relation("annonces_vente_validee_byTousers")
+  avis_avis_reviewed_user_idTousers                               avis[]                          @relation("avis_reviewed_user_idTousers")
+  avis_avis_reviewer_idTousers                                    avis[]                          @relation("avis_reviewer_idTousers")
+  candidature_traitements                                         candidature_traitements[]
+  candidatures_achat                                              candidatures_achat[]
+  candidatures_prefinancement                                     candidatures_prefinancement[]
+  commande_b2b_commande_b2b_exporter_idTousers                    commande_b2b[]                  @relation("commande_b2b_exporter_idTousers")
+  commande_b2b_commande_b2b_supplier_idTousers                    commande_b2b[]                  @relation("commande_b2b_supplier_idTousers")
+  commandes_vente_commandes_vente_buyer_idTousers                 commandes_vente[]               @relation("commandes_vente_buyer_idTousers")
+  commandes_vente_commandes_vente_seller_idTousers                commandes_vente[]               @relation("commandes_vente_seller_idTousers")
+  contrats_vente_coop                                             contrats_vente_coop[]
+  contre_offre_coop_traitements                                   contre_offre_coop_traitements[]
+  contre_offres_coop                                              contre_offres_coop[]
+  conversation_participants                                       conversation_participants[]
+  coop_advance_payments_coop_advance_payments_farmer_idTousers    coop_advance_payments[]         @relation("coop_advance_payments_farmer_idTousers")
+  coop_advance_payments_coop_advance_payments_paid_byTousers      coop_advance_payments[]         @relation("coop_advance_payments_paid_byTousers")
+  coop_invitations_coop_invitations_invited_byTousers             coop_invitations[]              @relation("coop_invitations_invited_byTousers")
+  coop_invitations_coop_invitations_invited_user_idTousers        coop_invitations[]              @relation("coop_invitations_invited_user_idTousers")
+  coop_join_requests_coop_join_requests_farmer_idTousers          coop_join_requests[]            @relation("coop_join_requests_farmer_idTousers")
+  coop_join_requests_coop_join_requests_handled_byTousers         coop_join_requests[]            @relation("coop_join_requests_handled_byTousers")
+  cooperative_members                                             cooperative_members[]
+  cooperative_profiles_cooperative_profiles_president_idTousers   cooperative_profiles[]          @relation("cooperative_profiles_president_idTousers")
+  cooperative_profiles                                            cooperative_profiles?
+  device_tokens                                                   device_tokens[]
+  disputes_disputes_opened_byTousers                              disputes[]                      @relation("disputes_opened_byTousers")
+  disputes_disputes_resolved_byTousers                            disputes[]                      @relation("disputes_resolved_byTousers")
+  entrepots                                                       entrepots[]
+  escrow_conditions_escrow_conditions_beneficiary_idTousers       escrow_conditions[]             @relation("escrow_conditions_beneficiary_idTousers")
+  escrow_conditions                                               escrow_conditions[]
+  exportateur_profiles                                            exportateur_profiles?
+  favoris                                                         favoris[]
+  lot_contributions                                               lot_contributions[]
+  lots                                                            lots[]
+  messages                                                        messages[]
+  moyen_de_payement                                               moyen_de_payement[]
+  negotiation_messages                                            negotiation_messages[]
+  notifications                                                   notifications[]
+  offres_marche_b2b                                               offres_marche_b2b[]
+  panier                                                          panier?
+  parcelle                                                        parcelle[]
+  payout_batches                                                  payout_batches[]
+  payout_items                                                    payout_items[]
+  phone_proxy_sessions_phone_proxy_sessions_callee_user_idTousers phone_proxy_sessions[]          @relation("phone_proxy_sessions_callee_user_idTousers")
+  phone_proxy_sessions_phone_proxy_sessions_caller_user_idTousers phone_proxy_sessions[]          @relation("phone_proxy_sessions_caller_user_idTousers")
+  plant_analyses                                                  plant_analyses[]
+  previsions_production                                           previsions_production[]
+  previsions_production_previsions_production_validee_byTousers   previsions_production[]         @relation("previsions_production_validee_byTousers")
+  producteur_profiles                                             producteur_profiles?
+  proposition_traitements                                         proposition_traitements[]
+  propositions_vente                                              propositions_vente[]
+  publication_contributions                                       publication_contributions[]
+  refresh_tokens                                                  refresh_tokens[]
+  reservations_previsions                                         reservations_previsions[]
+  shipments_shipments_pickup_scanned_byTousers                    shipments[]                     @relation("shipments_pickup_scanned_byTousers")
+  shipments                                                       shipments[]
+  sollicitation_recipients                                        sollicitation_recipients[]
+  sollicitations_coop                                             sollicitations_coop[]
+  traceability_events                                             traceability_events[]
+  transactions                                                    transactions[]
+  transporter_routes                                              transporter_routes[]
+  transporteur_profiles                                           transporteur_profiles?
+  user_cultures                                                   user_cultures[]
+  user_documents                                                  user_documents[]
+  user_login_history                                              user_login_history[]
+  cooperative_profiles_users_cooperative_idTocooperative_profiles cooperative_profiles?           @relation("users_cooperative_idTocooperative_profiles", fields: [cooperative_id], references: [id], onUpdate: NoAction)
+  wallets                                                         wallets[]
+
+  @@index([location], map: "idx_users_location", type: Gist)
+  @@index([phone], map: "idx_users_phone")
+  @@index([cooperative_id], map: "idx_users_cooperative")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model villes_ci {
+  id                      String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  region_id               String                    @db.Uuid
+  nom                     String                    @db.VarChar(100)
+  slug                    String                    @unique @db.VarChar(100)
+  type                    String                    @default("VILLE") @db.VarChar(20)
+  population              Int?
+  location                Unsupported("geography")?
+  is_chef_lieu            Boolean                   @default(false)
+  created_at              DateTime                  @default(now()) @db.Timestamptz(6)
+  annonces_achat          annonces_achat[]
+  annonces_vente          annonces_vente[]
+  cooperative_profiles    cooperative_profiles[]
+  entrepots               entrepots[]
+  producteur_profiles     producteur_profiles[]
+  publications_stock_coop publications_stock_coop[]
+  transporteur_profiles   transporteur_profiles[]
+  regions_ci              regions_ci                @relation(fields: [region_id], references: [id], onUpdate: NoAction)
+
+  @@index([location], map: "idx_villes_location", type: Gist)
+  @@index([region_id], map: "idx_villes_region")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model wallets {
+  id             String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id        String   @db.Uuid
+  currency       String   @default("XOF") @db.VarChar(5)
+  balance        Decimal  @default(0.00) @db.Decimal(15, 2)
+  balance_escrow Decimal  @default(0.00) @db.Decimal(15, 2)
+  is_frozen      Boolean  @default(false)
+  created_at     DateTime @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime @default(now()) @db.Timestamptz(6)
+  users          users    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([user_id, currency])
+}
+
+model transporter_routes {
+  id               String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  transporter_id   String   @db.Uuid
+  origin_zone      String   @db.VarChar(100)
+  destination_zone String   @db.VarChar(100)
+  tarif_kg         Decimal  @db.Decimal(8, 2)
+  tarif_minimum    Decimal  @default(0) @db.Decimal(10, 2)
+  capacite_max_kg  Decimal  @db.Decimal(10, 2)
+  delai_typique    String?  @db.VarChar(50)
+  is_active        Boolean  @default(true)
+  created_at       DateTime @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime @default(now()) @db.Timestamptz(6)
+  users            users    @relation(fields: [transporter_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([transporter_id, origin_zone, destination_zone])
+  @@index([transporter_id], map: "idx_transporter_routes_owner")
+}
+
+model exportateur_profiles {
+  id                  String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id             String   @unique @db.Uuid
+  company_name        String?  @db.VarChar(200)
+  numero_rccm         String?  @db.VarChar(100)
+  numero_ifu          String?  @db.VarChar(50)
+  agrement_export     String?  @db.VarChar(100)
+  produits_exportes   String[]
+  pays_destination    String[]
+  incoterms_supportes String[]
+  port_attache        String?  @db.VarChar(100)
+  volume_annuel_kg    Decimal? @db.Decimal(15, 2)
+  iban                String?  @db.VarChar(50)
+  swift_bic           String?  @db.VarChar(20)
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime @default(now()) @db.Timestamptz(6)
+  users               users    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([port_attache], map: "idx_exportateur_port")
+}
+
+model admin_profiles {
+  id                 String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id            String       @unique @db.Uuid
+  niveau             admin_niveau @default(ADMIN)
+  departement        String?      @db.VarChar(100)
+  peut_valider_kyc   Boolean      @default(false)
+  peut_gerer_finance Boolean      @default(false)
+  peut_gerer_users   Boolean      @default(false)
+  peut_publier_news  Boolean      @default(false)
+  notes              String?
+  created_at         DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime     @default(now()) @db.Timestamptz(6)
+  users              users        @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([niveau], map: "idx_admin_niveau")
+}
+
+model transporteur_profiles {
+  id                    String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id               String        @unique @db.Uuid
+  nom_entreprise        String?       @db.VarChar(200)
+  numero_rccm           String?       @db.VarChar(100)
+  numero_ifu            String?       @db.VarChar(50)
+  numero_permis         String        @db.VarChar(100)
+  categorie_permis      String?       @db.VarChar(10)
+  type_vehicule         type_vehicule
+  immatriculation       String        @unique @db.VarChar(20)
+  marque_modele         String?       @db.VarChar(100)
+  annee_vehicule        Int?
+  capacite_max_kg       Decimal       @db.Decimal(10, 2)
+  volume_max_m3         Decimal?      @db.Decimal(8, 2)
+  is_refrigere          Boolean       @default(false)
+  is_bache              Boolean       @default(false)
+  region_id             String?       @db.Uuid
+  ville_id              String?       @db.Uuid
+  zones_couvertes       String[]
+  rayon_action_km       Int?
+  tarif_kg_default      Decimal?      @db.Decimal(8, 2)
+  tarif_minimum_default Decimal?      @db.Decimal(10, 2)
+  nb_voyages_total      Int           @default(0)
+  disponible            Boolean       @default(true)
+  created_at            DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime      @default(now()) @db.Timestamptz(6)
+  regions_ci            regions_ci?   @relation(fields: [region_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users                 users         @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  villes_ci             villes_ci?    @relation(fields: [ville_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([region_id], map: "idx_transporteur_region")
+  @@index([ville_id], map: "idx_transporteur_ville")
+  @@index([type_vehicule], map: "idx_transporteur_type")
+}
+
+model ai_news {
+  id         String      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  type       String      @default("GENERAL") @db.VarChar(30)
+  titre      String      @db.VarChar(200)
+  body       String
+  cible_role String?     @db.VarChar(30)
+  region_id  String?     @db.Uuid
+  expires_at DateTime?   @db.Timestamptz(6)
+  is_active  Boolean     @default(true)
+  created_by String      @db.Uuid
+  created_at DateTime    @default(now()) @db.Timestamptz(6)
+  updated_at DateTime    @default(now()) @db.Timestamptz(6)
+  users      users       @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  regions_ci regions_ci? @relation(fields: [region_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model coop_invitations {
+  id                                            String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  cooperative_id                                String               @db.Uuid
+  invited_phone                                 String               @db.VarChar(20)
+  invited_user_id                               String?              @db.Uuid
+  invited_by                                    String               @db.Uuid
+  message                                       String?
+  status                                        coop_request_status  @default(PENDING)
+  handled_at                                    DateTime?            @db.Timestamptz(6)
+  created_at                                    DateTime             @default(now()) @db.Timestamptz(6)
+  cooperative_profiles                          cooperative_profiles @relation(fields: [cooperative_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_coop_invitations_invited_byTousers      users                @relation("coop_invitations_invited_byTousers", fields: [invited_by], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_coop_invitations_invited_user_idTousers users?               @relation("coop_invitations_invited_user_idTousers", fields: [invited_user_id], references: [id], onUpdate: NoAction)
+
+  @@index([cooperative_id, status], map: "idx_coop_invitations_coop")
+  @@index([invited_phone, status], map: "idx_coop_invitations_phone")
+}
+
+model coop_join_requests {
+  id                                         String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  cooperative_id                             String               @db.Uuid
+  farmer_id                                  String               @db.Uuid
+  message                                    String?
+  status                                     coop_request_status  @default(PENDING)
+  handled_by                                 String?              @db.Uuid
+  handled_at                                 DateTime?            @db.Timestamptz(6)
+  rejection_reason                           String?
+  created_at                                 DateTime             @default(now()) @db.Timestamptz(6)
+  cooperative_profiles                       cooperative_profiles @relation(fields: [cooperative_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_coop_join_requests_farmer_idTousers  users                @relation("coop_join_requests_farmer_idTousers", fields: [farmer_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_coop_join_requests_handled_byTousers users?               @relation("coop_join_requests_handled_byTousers", fields: [handled_by], references: [id], onUpdate: NoAction)
+
+  @@unique([cooperative_id, farmer_id, status], map: "uniq_pending_join_request")
+  @@index([cooperative_id, status], map: "idx_coop_join_requests_coop")
+  @@index([farmer_id, status], map: "idx_coop_join_requests_farmer")
+}
+
+model publication_contributions {
+  id                      String                  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  publication_id          String                  @db.Uuid
+  annonce_vente_id        String                  @db.Uuid
+  farmer_id               String                  @db.Uuid
+  quantite_kg             Decimal                 @db.Decimal(10, 2)
+  prix_kg                 Decimal                 @db.Decimal(10, 2)
+  part_pct                Decimal                 @db.Decimal(7, 4)
+  paid_amount             Decimal?                @db.Decimal(12, 2)
+  paid_at                 DateTime?               @db.Timestamptz(6)
+  created_at              DateTime                @default(now()) @db.Timestamptz(6)
+  annonces_vente          annonces_vente          @relation(fields: [annonce_vente_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                   users                   @relation(fields: [farmer_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  publications_stock_coop publications_stock_coop @relation(fields: [publication_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([publication_id, annonce_vente_id], map: "uniq_contrib_per_annonce")
+  @@index([farmer_id], map: "idx_pub_contrib_farmer")
+  @@index([publication_id], map: "idx_pub_contrib_publication")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model negotiation_messages {
+  id                   String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  candidature_id       String?             @db.Uuid
+  proposition_id       String?             @db.Uuid
+  contre_offre_coop_id String?             @db.Uuid
+  sender_id            String              @db.Uuid
+  content              String
+  read_at              DateTime?           @db.Timestamptz(6)
+  created_at           DateTime            @default(now()) @db.Timestamptz(6)
+  candidatures_achat   candidatures_achat? @relation(fields: [candidature_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  contre_offres_coop   contre_offres_coop? @relation(fields: [contre_offre_coop_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  propositions_vente   propositions_vente? @relation(fields: [proposition_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                users               @relation(fields: [sender_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([sender_id], map: "idx_negmsg_sender")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model coop_advance_payments {
+  id                                           String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  cooperative_id                               String               @db.Uuid
+  farmer_id                                    String               @db.Uuid
+  annonce_vente_id                             String?              @db.Uuid
+  amount                                       Decimal              @db.Decimal(12, 2)
+  status                                       coop_advance_status  @default(PAID)
+  paid_at                                      DateTime             @default(now()) @db.Timestamptz(6)
+  reimbursed_at                                DateTime?            @db.Timestamptz(6)
+  notes                                        String?
+  paid_by                                      String               @db.Uuid
+  created_at                                   DateTime             @default(now()) @db.Timestamptz(6)
+  annonces_vente                               annonces_vente?      @relation(fields: [annonce_vente_id], references: [id], onUpdate: NoAction)
+  cooperative_profiles                         cooperative_profiles @relation(fields: [cooperative_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_coop_advance_payments_farmer_idTousers users                @relation("coop_advance_payments_farmer_idTousers", fields: [farmer_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_coop_advance_payments_paid_byTousers   users                @relation("coop_advance_payments_paid_byTousers", fields: [paid_by], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([annonce_vente_id], map: "idx_advances_annonce")
+  @@index([cooperative_id, status], map: "idx_advances_coop_status")
+  @@index([farmer_id, status], map: "idx_advances_farmer")
+}
+
+model admin_audit_log {
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  admin_id    String   @db.Uuid
+  action      String   @db.VarChar(80)
+  target_type String?  @db.VarChar(50)
+  target_id   String?  @db.Uuid
+  payload     Json?
+  ip          String?  @db.VarChar(64)
+  user_agent  String?  @db.VarChar(255)
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  users       users    @relation(fields: [admin_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([action, created_at], map: "idx_admin_audit_log_action")
+  @@index([admin_id, created_at], map: "idx_admin_audit_log_admin")
+  @@index([target_type, target_id], map: "idx_admin_audit_log_target")
+}
+
+model provider_circuit_state {
+  provider        String    @id @db.VarChar(40)
+  state           String    @default("CLOSED") @db.VarChar(20)
+  failure_count   Int       @default(0)
+  last_failure_at DateTime? @db.Timestamptz(6)
+  opened_at       DateTime? @db.Timestamptz(6)
+  updated_at      DateTime  @default(now()) @db.Timestamptz(6)
+}
+
+model annonce_vente_traitements {
+  id                     String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  annonce_vente_id       String              @db.Uuid
+  produit_traitement_id  String              @db.Uuid
+  dosage_utilise         String?             @db.VarChar(200)
+  date_application       DateTime?           @db.Date
+  delai_carence_respecte Boolean?
+  notes                  String?
+  created_at             DateTime            @default(now()) @db.Timestamptz(6)
+  annonces_vente         annonces_vente      @relation(fields: [annonce_vente_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  produits_traitement    produits_traitement @relation(fields: [produit_traitement_id], references: [id], onUpdate: NoAction)
+
+  @@unique([annonce_vente_id, produit_traitement_id], map: "uniq_annonce_traitement")
+  @@index([annonce_vente_id], map: "idx_annonce_traitements_annonce")
+}
+
+model publication_coop_traitements {
+  id                      String                  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  publication_id          String                  @db.Uuid
+  produit_traitement_id   String                  @db.Uuid
+  dosage_utilise          String?                 @db.VarChar(200)
+  date_application        DateTime?               @db.Date
+  delai_carence_respecte  Boolean?
+  notes                   String?
+  created_at              DateTime                @default(now()) @db.Timestamptz(6)
+  produits_traitement     produits_traitement     @relation(fields: [produit_traitement_id], references: [id], onUpdate: NoAction)
+  publications_stock_coop publications_stock_coop @relation(fields: [publication_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([publication_id, produit_traitement_id], map: "uniq_publication_traitement")
+  @@index([publication_id], map: "idx_publication_traitements_pub")
+}
+
+model sollicitation_recipients {
+  id                   String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  sollicitation_id     String                @db.Uuid
+  user_id              String                @db.Uuid
+  audience_segment     String                @db.VarChar(20)
+  cooperative_id       String?               @db.Uuid
+  notification_id      String?               @db.Uuid
+  sms_sent_at          DateTime?             @db.Timestamptz(6)
+  opened_at            DateTime?             @db.Timestamptz(6)
+  responded_at         DateTime?             @db.Timestamptz(6)
+  response_action      String?               @db.VarChar(20)
+  response_quantite_kg Decimal?              @db.Decimal(10, 2)
+  created_at           DateTime              @default(now()) @db.Timestamptz(6)
+  cooperative_profiles cooperative_profiles? @relation(fields: [cooperative_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  notifications        notifications?        @relation(fields: [notification_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sollicitations_coop  sollicitations_coop   @relation(fields: [sollicitation_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                users                 @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([sollicitation_id, user_id])
+  @@index([audience_segment], map: "idx_sollicit_recipients_segment")
+  @@index([user_id], map: "idx_sollicit_recipients_user")
+}
+
+model sollicitations_coop {
+  id                       String                     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  cooperative_id           String                     @db.Uuid
+  annonce_achat_id         String                     @db.Uuid
+  initiated_by             String                     @db.Uuid
+  message                  String
+  audiences                String[]
+  rayon_km                 Int?                       @default(50)
+  quantite_cible_kg        Decimal?                   @db.Decimal(12, 2)
+  expires_at               DateTime                   @db.Timestamptz(6)
+  status                   String                     @default("OPEN") @db.VarChar(20)
+  total_recipients         Int?                       @default(0)
+  total_responses          Int?                       @default(0)
+  total_quantite_offerte   Decimal?                   @default(0) @db.Decimal(12, 2)
+  created_at               DateTime                   @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime                   @default(now()) @db.Timestamptz(6)
+  sollicitation_recipients sollicitation_recipients[]
+  annonces_achat           annonces_achat             @relation(fields: [annonce_achat_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  cooperative_profiles     cooperative_profiles       @relation(fields: [cooperative_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                    users                      @relation(fields: [initiated_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([annonce_achat_id], map: "idx_sollicit_annonce")
+  @@index([cooperative_id], map: "idx_sollicit_coop")
+  @@index([status], map: "idx_sollicit_status")
+}
+
+model phone_proxy_sessions {
+  id                                               String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  caller_user_id                                   String           @db.Uuid
+  callee_user_id                                   String           @db.Uuid
+  commande_id                                      String?          @db.Uuid
+  proxy_phone                                      String           @db.VarChar(20)
+  provider_session_id                              String?          @db.VarChar(120)
+  expires_at                                       DateTime         @db.Timestamptz(6)
+  call_count                                       Int?             @default(0)
+  total_duration_sec                               Int?             @default(0)
+  last_call_at                                     DateTime?        @db.Timestamptz(6)
+  status                                           String?          @default("ACTIVE") @db.VarChar(20)
+  created_at                                       DateTime         @default(now()) @db.Timestamptz(6)
+  users_phone_proxy_sessions_callee_user_idTousers users            @relation("phone_proxy_sessions_callee_user_idTousers", fields: [callee_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_phone_proxy_sessions_caller_user_idTousers users            @relation("phone_proxy_sessions_caller_user_idTousers", fields: [caller_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  commandes_vente                                  commandes_vente? @relation(fields: [commande_id], references: [id], onUpdate: NoAction)
+
+  @@index([callee_user_id], map: "idx_phone_proxy_callee")
+  @@index([caller_user_id], map: "idx_phone_proxy_caller")
+  @@index([commande_id], map: "idx_phone_proxy_commande")
+}
+
+enum kyc_status {
+  PENDING
+  VERIFIED
+  REJECTED
+  EXPIRED
+}
+
+enum mobile_provider {
+  ORANGE_MONEY
+  MTN_MOMO
+  WAVE
+  MOOV
+  VIREMENT
+  WALLET
+}
+
+enum order_status {
+  SENT
+  ACCEPTED
+  REJECTED
+  IN_PROGRESS
+  DELIVERED
+  COMPLETED
+  DISPUTED
+  CANCELLED
+}
+
+enum product_quality {
+  STANDARD
+  PREMIUM
+  BIO
+  EQUITABLE
+}
+
+enum product_status {
+  DRAFT
+  ACTIVE
+  PAUSED
+  SOLD
+  EXPIRED
+}
+
+enum shipment_status {
+  REQUESTED
+  ACCEPTED
+  LOADING
+  IN_TRANSIT
+  DELIVERED
+  CANCELLED
+}
+
+enum user_role {
+  FARMER
+  BUYER
+  TRANSPORTER
+  EXPORTER
+  COOPERATIVE
+  ADMIN
+}
+
+enum coop_annonce_status {
+  PENDING
+  VALIDATED
+  INCLUDED
+  REJECTED
+}
+
+enum coop_request_status {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+enum coop_advance_status {
+  PAID
+  REIMBURSED
+  CANCELLED
+}
+
+enum buy_offer_audience {
+  PUBLIC
+  ALL_COOPERATIVES
+  SPECIFIC_COOPERATIVE
+}
+
+enum prevision_status {
+  OPEN
+  CONVERTED
+  EXPIRED
+  CANCELLED
+}
+
+enum type_vehicule {
+  MOTO
+  TRICYCLE
+  PICKUP
+  FOURGON
+  CAMION
+  CAMION_FRIGO
+  REMORQUE
+}
+
+enum admin_niveau {
+  SUPER_ADMIN
+  ADMIN
+  MODERATOR
+  SUPPORT
+}
