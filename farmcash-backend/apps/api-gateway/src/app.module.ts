@@ -22,6 +22,8 @@ import { NotificationsModule } from '@farmcash/notifications';
 import { AiModule } from '@farmcash/ai';
 import { OversightModule } from '@farmcash/oversight';
 import { CooperativesModule } from '@farmcash/cooperatives';
+import { BuyerModule } from '@farmcash/buyer';
+import { CoopLogisticsModule } from '@farmcash/coop-logistics';
 
 @Module({
   imports: [
@@ -55,6 +57,8 @@ import { CooperativesModule } from '@farmcash/cooperatives';
     AiModule,
     OversightModule,
     CooperativesModule,
+    BuyerModule,
+    CoopLogisticsModule,
   ],
   providers: [
     // Rate limiting global (premier guard exécuté). Désactivé en E2E.

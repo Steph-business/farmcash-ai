@@ -135,6 +135,24 @@
       "compilerOptions": {
         "tsConfigPath": "modules/cooperatives/tsconfig.lib.json"
       }
+    },
+    "buyer": {
+      "type": "library",
+      "root": "modules/buyer",
+      "entryFile": "index",
+      "sourceRoot": "modules/buyer/src",
+      "compilerOptions": {
+        "tsConfigPath": "modules/buyer/tsconfig.lib.json"
+      }
+    },
+    "coop-logistics": {
+      "type": "library",
+      "root": "modules/coop-logistics",
+      "entryFile": "index",
+      "sourceRoot": "modules/coop-logistics/src",
+      "compilerOptions": {
+        "tsConfigPath": "modules/coop-logistics/tsconfig.lib.json"
+      }
     }
   }
 }

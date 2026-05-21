@@ -92,7 +92,10 @@ export class PanierService {
       );
     }
 
-    // Transaction : panier + item.
+    // Transaction : panier + item. L'upsert s'appuie sur la contrainte
+    // unique (panier_id, annonce_id) — atomique côté DB, élimine la
+    // race condition findFirst+update. On vérifie ensuite que la qty
+    // cumulée ne dépasse pas le stock ; si oui on rollback via throw.
     return this.prisma.$transaction(async (tx) => {
       const panier = await tx.panier.upsert({
         where: { user_id: userId },
@@ -100,29 +103,32 @@ export class PanierService {
         create: { user_id: userId },
       });
 
-      const existing = await tx.panier_items.findFirst({
-        where: { panier_id: panier.id, annonce_id: dto.annonce_id },
-      });
-
-      if (existing) {
-        const newQty = existing.quantite_kg.toNumber() + dto.quantite_kg;
-        if (newQty > annonce.quantite_kg.toNumber()) {
-          throw new BadRequestException('Quantité cumulée supérieure au stock.');
-        }
-        await tx.panier_items.update({
-          where: { id: existing.id },
-          data: { quantite_kg: newQty, prix_unitaire: annonce.prix_par_kg },
-        });
-      } else {
-        await tx.panier_items.create({
-          data: {
+      const item = await tx.panier_items.upsert({
+        where: {
+          panier_id_annonce_id: {
             panier_id: panier.id,
             annonce_id: dto.annonce_id,
-            quantite_kg: dto.quantite_kg,
-            // Prix relu de l'annonce côté serveur — le client ne décide pas.
-            prix_unitaire: annonce.prix_par_kg,
           },
-        });
+        },
+        create: {
+          panier_id: panier.id,
+          annonce_id: dto.annonce_id,
+          quantite_kg: dto.quantite_kg,
+          // Prix relu de l'annonce côté serveur — le client ne décide pas.
+          prix_unitaire: annonce.prix_par_kg,
+        },
+        update: {
+          quantite_kg: { increment: dto.quantite_kg },
+          // Realign le prix sur la valeur actuelle de l'annonce (anti-
+          // stale price si l'annonce a été mise à jour entre 2 ajouts).
+          prix_unitaire: annonce.prix_par_kg,
+        },
+      });
+
+      // Anti-overshoot stock : si la qty cumulée dépasse le stock, on
+      // rollback la transaction.
+      if (item.quantite_kg.toNumber() > annonce.quantite_kg.toNumber()) {
+        throw new BadRequestException('Quantité cumulée supérieure au stock.');
       }
 
       return { message: 'Article ajouté au panier avec succès.' };

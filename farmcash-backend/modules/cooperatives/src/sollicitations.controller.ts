@@ -20,6 +20,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -125,5 +126,29 @@ export class SollicitationsController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.service.close(user.sub, id);
+  }
+
+  @Put(':sollicitationId/recipients/:recipientId/confirm')
+  @HttpCode(HttpStatus.OK)
+  @Roles('COOPERATIVE')
+  @ApiOperation({
+    summary:
+      "[COOP] Confirmer (contractualiser) la réponse ACCEPTED d'un destinataire",
+  })
+  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 400, description: 'La réponse n\'est pas ACCEPTED' })
+  @ApiResponse({ status: 403, description: 'Pas initiateur de la sollicitation' })
+  @ApiResponse({ status: 404, description: 'Sollicitation ou destinataire introuvable' })
+  @ApiResponse({ status: 409, description: 'Déjà confirmé par la coop' })
+  confirmRecipient(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('sollicitationId', ParseUUIDPipe) sollicitationId: string,
+    @Param('recipientId', ParseUUIDPipe) recipientId: string,
+  ) {
+    return this.service.acceptRecipientResponse(
+      user.sub,
+      sollicitationId,
+      recipientId,
+    );
   }
 }

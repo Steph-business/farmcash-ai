@@ -16,6 +16,7 @@
 
 import { ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { NotificationType } from '@farmcash/notifications';
 import { FinanceService } from './finance.service';
 import { TransactionType } from './dto/finance.dto';
 
@@ -65,6 +66,11 @@ function createPrismaStub() {
     transactions,
     moyen_de_payement,
     notifications,
+    // commandes_vente / escrow_conditions sont peuplés par les tests qui
+    // en ont besoin (cf. describe releaseEscrow). On les laisse vides ici
+    // pour ne pas alourdir les autres tests.
+    commandes_vente: {},
+    escrow_conditions: {},
     $transaction,
     $queryRaw,
   };
@@ -111,7 +117,10 @@ describe('FinanceService — Chantier 4 (topup)', () => {
     prisma = createPrismaStub();
     config = createConfigStub();
     provider = createProviderStub('PENDING');
-    service = new FinanceService(prisma, config, provider);
+    // Stub NotificationsService — la méthode `create` est best-effort
+    // (try/catch), on lui passe juste un noop qui ne throw pas.
+    const notifications: any = { create: jest.fn().mockResolvedValue(undefined) };
+    service = new FinanceService(prisma, config, provider, notifications);
   });
 
   // ===================================================================
@@ -310,6 +319,81 @@ describe('FinanceService — Chantier 4 (topup)', () => {
       expect(prisma.transactions.update).not.toHaveBeenCalled();
       expect(result.status).toBe('SUCCESS');
       expect(result.new_balance).toBe(50000);
+    });
+  });
+
+  // ===================================================================
+  //  releaseEscrow → notification WALLET_CREDITED au bénéficiaire
+  //  ---------------------------------------------------------------------
+  //  On vérifie que la libération d'un escrow LOCKED déclenche bien un
+  //  appel à notificationsService.create avec le type WALLET_CREDITED.
+  //  La logique interne (split fee, escrow update, etc.) est testée via
+  //  d'autres tests E2E ; on cible ici l'effet de bord notif.
+  // ===================================================================
+
+  describe('releaseEscrow → notif WALLET_CREDITED', () => {
+    it('7. envoie une notif WALLET_CREDITED au bénéficiaire crédité', async () => {
+      const notificationsMock: any = {
+        create: jest.fn().mockResolvedValue({}),
+      };
+      // Re-instancie le service avec un mock de notifications dédié.
+      service = new FinanceService(prisma, config, provider, notificationsMock);
+
+      const COMMANDE_ID = '99999999-9999-9999-9999-999999999999';
+      const BENEFICIARY_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+      const BUYER_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+
+      // commande existante
+      prisma.commandes_vente = {
+        findUnique: jest.fn().mockResolvedValue({
+          id: COMMANDE_ID,
+          buyer_id: BUYER_ID,
+          reference: 'ORD-TEST-7',
+          status: 'DELIVERED',
+        }),
+        update: jest.fn().mockResolvedValue({}),
+      };
+      // un escrow LOCKED côté seller
+      prisma.escrow_conditions = {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'escrow-1',
+            kind: 'PRODUCT',
+            beneficiary_id: BENEFICIARY_ID,
+            montant: decimal(10000),
+            frais_service: decimal(300),
+            status: 'LOCKED',
+          },
+        ]),
+        count: jest.fn().mockResolvedValue(0), // 0 LOCKED restant après release
+        update: jest.fn().mockResolvedValue({}),
+      };
+      // wallets : raw lock + update
+      prisma.$queryRaw.mockResolvedValue([
+        {
+          id: 'wallet-buyer',
+          user_id: BUYER_ID,
+          balance: decimal(0),
+          balance_escrow: decimal(10000),
+          is_frozen: false,
+        },
+      ]);
+      prisma.wallets.findUnique.mockResolvedValue({
+        balance: decimal(0),
+        balance_escrow: decimal(10000),
+      });
+      prisma.transactions.create.mockResolvedValue({});
+
+      await service.releaseEscrow(COMMANDE_ID, 'admin-id', undefined, 'DELIVERY_CONFIRMED');
+
+      // Vérifie qu'une notif WALLET_CREDITED a été émise au bénéficiaire.
+      expect(notificationsMock.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          user_id: BENEFICIARY_ID,
+          type: NotificationType.WALLET_CREDITED,
+          commande_id: COMMANDE_ID,
+        }),
+      );
     });
   });
 

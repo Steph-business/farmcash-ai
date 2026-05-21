@@ -50,6 +50,7 @@ export enum SollicitationResponseAction {
   ACCEPTED = 'ACCEPTED',
   REJECTED = 'REJECTED',
   IGNORED = 'IGNORED',
+  CONFIRMED_BY_COOP = 'CONFIRMED_BY_COOP',
 }
 
 // ---------------------------------------------------------------------

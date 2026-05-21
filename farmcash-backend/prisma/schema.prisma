@@ -119,6 +119,7 @@ model annonces_vente {
   propositions_vente                     propositions_vente[]
   publication_contributions              publication_contributions[]
   stock                                  stock[]
+  coop_collections                       coop_collections[]
 
   @@index([farmer_id], map: "idx_annonces_farmer")
   @@index([location], map: "idx_annonces_location", type: Gist)
@@ -412,6 +413,8 @@ model cooperative_profiles {
   publications_stock_coop                          publications_stock_coop[]
   sollicitation_recipients                         sollicitation_recipients[]
   sollicitations_coop                              sollicitations_coop[]
+  coop_vehicles                                    coop_vehicles[]
+  coop_collections                                 coop_collections[]
   users_users_cooperative_idTocooperative_profiles users[]                    @relation("users_cooperative_idTocooperative_profiles")
 
   @@index([region_id], map: "idx_coop_region")
@@ -584,6 +587,7 @@ model medias {
   annonce_vente_id        String?                  @db.Uuid
   publication_coop_id     String?                  @db.Uuid
   lot_id                  String?                  @db.Uuid
+  parcelle_id             String?                  @db.Uuid
   media_type              String                   @db.VarChar(10)
   url                     String
   thumbnail_url           String?
@@ -592,6 +596,7 @@ model medias {
   lots                    lots?                    @relation(fields: [lot_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_medias_lot")
   publications_stock_coop publications_stock_coop? @relation(fields: [publication_coop_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_medias_publication")
   annonces_vente          annonces_vente?          @relation(fields: [annonce_vente_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  parcelle                parcelle?                @relation(fields: [parcelle_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_medias_parcelle")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
@@ -701,6 +706,8 @@ model panier_items {
   created_at     DateTime       @default(now()) @db.Timestamptz(6)
   annonces_vente annonces_vente @relation(fields: [annonce_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   panier         panier         @relation(fields: [panier_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([panier_id, annonce_id], map: "panier_items_panier_annonce_uniq")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
@@ -715,6 +722,7 @@ model parcelle {
   created_at            DateTime                  @default(now()) @db.Timestamptz(6)
   produits_agricoles    produits_agricoles?       @relation(fields: [produit_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   users                 users                     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  medias                medias[]
   plant_analyses        plant_analyses[]
   previsions_production previsions_production[]
   user_cultures         user_cultures[]
@@ -1237,6 +1245,9 @@ model users {
   annonces_achat                                                  annonces_achat[]
   annonces_prefinancement                                         annonces_prefinancement[]
   annonces_vente                                                  annonces_vente[]
+  buyer_addresses                                                 buyer_addresses[]
+  vehicles                                                        vehicles[]
+  kyc_documents                                                   kyc_documents[]
   annonces_vente_annonces_vente_validee_byTousers                 annonces_vente[]                @relation("annonces_vente_validee_byTousers")
   avis_avis_reviewed_user_idTousers                               avis[]                          @relation("avis_reviewed_user_idTousers")
   avis_avis_reviewer_idTousers                                    avis[]                          @relation("avis_reviewer_idTousers")
@@ -1303,6 +1314,7 @@ model users {
   user_login_history                                              user_login_history[]
   cooperative_profiles_users_cooperative_idTocooperative_profiles cooperative_profiles?           @relation("users_cooperative_idTocooperative_profiles", fields: [cooperative_id], references: [id], onUpdate: NoAction)
   wallets                                                         wallets[]
+  coop_collections                                                coop_collections[]              @relation("coop_collections_farmerTousers")
 
   @@index([location], map: "idx_users_location", type: Gist)
   @@index([phone], map: "idx_users_phone")
@@ -1323,6 +1335,7 @@ model villes_ci {
   created_at              DateTime                  @default(now()) @db.Timestamptz(6)
   annonces_achat          annonces_achat[]
   annonces_vente          annonces_vente[]
+  buyer_addresses         buyer_addresses[]
   cooperative_profiles    cooperative_profiles[]
   entrepots               entrepots[]
   producteur_profiles     producteur_profiles[]
@@ -1613,22 +1626,23 @@ model publication_coop_traitements {
 }
 
 model sollicitation_recipients {
-  id                   String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  sollicitation_id     String                @db.Uuid
-  user_id              String                @db.Uuid
-  audience_segment     String                @db.VarChar(20)
-  cooperative_id       String?               @db.Uuid
-  notification_id      String?               @db.Uuid
-  sms_sent_at          DateTime?             @db.Timestamptz(6)
-  opened_at            DateTime?             @db.Timestamptz(6)
-  responded_at         DateTime?             @db.Timestamptz(6)
-  response_action      String?               @db.VarChar(20)
-  response_quantite_kg Decimal?              @db.Decimal(10, 2)
-  created_at           DateTime              @default(now()) @db.Timestamptz(6)
-  cooperative_profiles cooperative_profiles? @relation(fields: [cooperative_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  notifications        notifications?        @relation(fields: [notification_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  sollicitations_coop  sollicitations_coop   @relation(fields: [sollicitation_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  users                users                 @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  id                    String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  sollicitation_id      String                @db.Uuid
+  user_id               String                @db.Uuid
+  audience_segment      String                @db.VarChar(20)
+  cooperative_id        String?               @db.Uuid
+  notification_id       String?               @db.Uuid
+  sms_sent_at           DateTime?             @db.Timestamptz(6)
+  opened_at             DateTime?             @db.Timestamptz(6)
+  responded_at          DateTime?             @db.Timestamptz(6)
+  response_action       String?               @db.VarChar(20)
+  response_quantite_kg  Decimal?              @db.Decimal(10, 2)
+  confirmed_by_coop_at  DateTime?             @db.Timestamptz(6)
+  created_at            DateTime              @default(now()) @db.Timestamptz(6)
+  cooperative_profiles  cooperative_profiles? @relation(fields: [cooperative_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  notifications         notifications?        @relation(fields: [notification_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sollicitations_coop   sollicitations_coop   @relation(fields: [sollicitation_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                 users                 @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([sollicitation_id, user_id])
   @@index([audience_segment], map: "idx_sollicit_recipients_segment")
@@ -1681,6 +1695,59 @@ model phone_proxy_sessions {
   @@index([callee_user_id], map: "idx_phone_proxy_callee")
   @@index([caller_user_id], map: "idx_phone_proxy_caller")
   @@index([commande_id], map: "idx_phone_proxy_commande")
+}
+
+model buyer_addresses {
+  id               String     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id          String     @db.Uuid
+  libelle          String     @db.VarChar(100)
+  contact_nom      String     @db.VarChar(100)
+  contact_phone    String     @db.VarChar(20)
+  adresse_complete String
+  ville_id         String?    @db.Uuid
+  lat              Decimal?   @db.Decimal(10, 7)
+  lng              Decimal?   @db.Decimal(10, 7)
+  is_default       Boolean    @default(false)
+  is_active        Boolean    @default(true)
+  created_at       DateTime   @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime   @default(now()) @db.Timestamptz(6)
+  users            users      @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  villes_ci        villes_ci? @relation(fields: [ville_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([user_id], map: "idx_buyer_addresses_user")
+}
+
+model vehicles {
+  id              String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  transporter_id  String   @db.Uuid
+  type            String   @db.VarChar(30)
+  immatriculation String?  @unique @db.VarChar(20)
+  marque          String?  @db.VarChar(50)
+  charge_max_kg   Decimal  @db.Decimal(10, 2)
+  volume_m3       Decimal? @db.Decimal(8, 2)
+  photo_url       String?
+  is_active       Boolean  @default(true)
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime @default(now()) @db.Timestamptz(6)
+  users           users    @relation(fields: [transporter_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([transporter_id], map: "idx_vehicles_transporter")
+}
+
+model kyc_documents {
+  id               String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  user_id          String    @db.Uuid
+  doc_type         String    @db.VarChar(30)
+  url              String
+  status           String    @default("PENDING") @db.VarChar(30)
+  rejection_reason String?
+  uploaded_at      DateTime  @default(now()) @db.Timestamptz(6)
+  validated_at     DateTime? @db.Timestamptz(6)
+  validated_by     String?   @db.Uuid
+  users            users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([user_id], map: "idx_kyc_documents_user")
+  @@index([status], map: "idx_kyc_documents_status")
 }
 
 enum kyc_status {
@@ -1791,4 +1858,53 @@ enum admin_niveau {
   ADMIN
   MODERATOR
   SUPPORT
+}
+
+// =====================================================================
+//  COOP LOGISTICS — Parc véhicules et collectes internes
+//  ---------------------------------------------------------------------
+//  Parc de véhicules détenu par une coopérative + planification de
+//  collectes membre → coop (avant pesée et stockage).
+// =====================================================================
+
+model coop_vehicles {
+  id                String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  cooperative_id    String              @db.Uuid
+  type              String              @db.VarChar(30)
+  immatriculation   String?             @unique @db.VarChar(20)
+  marque            String?             @db.VarChar(50)
+  charge_max_kg     Decimal             @db.Decimal(10, 2)
+  chauffeur_nom     String?             @db.VarChar(100)
+  chauffeur_phone   String?             @db.VarChar(20)
+  is_active         Boolean             @default(true)
+  created_at        DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime            @default(now()) @db.Timestamptz(6)
+  cooperative_profiles cooperative_profiles @relation(fields: [cooperative_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  coop_collections  coop_collections[]
+
+  @@index([cooperative_id], map: "idx_coop_vehicles_coop")
+}
+
+model coop_collections {
+  id                  String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  cooperative_id      String              @db.Uuid
+  farmer_id           String              @db.Uuid
+  annonce_vente_id    String?             @db.Uuid
+  vehicle_id          String?             @db.Uuid
+  scheduled_at        DateTime            @db.Timestamptz(6)
+  pickup_address      String
+  quantite_prevue_kg  Decimal             @db.Decimal(10, 2)
+  status              String              @default("PLANNED") @db.VarChar(20)
+  notes               String?
+  completed_at        DateTime?           @db.Timestamptz(6)
+  created_at          DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime            @default(now()) @db.Timestamptz(6)
+  cooperative_profiles cooperative_profiles @relation(fields: [cooperative_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users               users               @relation("coop_collections_farmerTousers", fields: [farmer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  annonces_vente      annonces_vente?     @relation(fields: [annonce_vente_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  coop_vehicles       coop_vehicles?      @relation(fields: [vehicle_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([cooperative_id, status], map: "idx_coop_collections_coop_status")
+  @@index([farmer_id], map: "idx_coop_collections_farmer")
+  @@index([scheduled_at], map: "idx_coop_collections_scheduled")
 }

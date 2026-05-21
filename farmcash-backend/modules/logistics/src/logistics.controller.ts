@@ -33,25 +33,32 @@ import {
 import { AuthenticatedUser, CurrentUser } from '@farmcash/shared';
 import { JwtAuthGuard, Roles, RolesGuard } from '@farmcash/auth';
 import { LogisticsService } from './logistics.service';
+import { VehiclesService } from './vehicles.service';
 import {
   CreateTransporterRouteDto,
   QuoteTransportQueryDto,
   UpdateTransporterRouteDto,
 } from './dto/routes.dto';
 import {
+  EvaluateShipmentDto,
   MarkDeliveredDto,
   PickupQrTokenResponseDto,
   ScanPickupDto,
+  ShipmentStatus,
   StartLoadingDto,
   TrackPositionDto,
 } from './dto/shipments.dto';
+import { CreateVehicleDto, UpdateVehicleDto } from './dto/vehicles.dto';
 
 @ApiTags('🚚 Logistique')
 @Controller('logistics')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
 export class LogisticsController {
-  constructor(private readonly logisticsService: LogisticsService) {}
+  constructor(
+    private readonly logisticsService: LogisticsService,
+    private readonly vehiclesService: VehiclesService,
+  ) {}
 
   // ----------------- ROUTES TRANSPORTEUR -----------------
 
@@ -111,6 +118,63 @@ export class LogisticsController {
   @ApiOperation({ summary: 'Missions REQUESTED qui matchent mes routes' })
   getAvailableMissions(@CurrentUser() user: AuthenticatedUser) {
     return this.logisticsService.getAvailableMissions(user.sub);
+  }
+
+  // ----------------- MES MISSIONS (assignées) -----------------
+
+  @Get('shipments/my')
+  @Roles('TRANSPORTER')
+  @ApiOperation({
+    summary: "Mes missions (acceptées + en cours + livrées + annulées)",
+    description:
+      'Filtrable par status. Sans filtre, retourne TOUTES les missions assignées au transporteur, ordre récent → ancien.',
+  })
+  getMyMissions(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('status') status?: ShipmentStatus,
+  ) {
+    return this.logisticsService.getMyMissions(user.sub, status);
+  }
+
+  // ----------------- VÉHICULES -----------------
+
+  @Get('vehicles/my')
+  @Roles('TRANSPORTER')
+  @ApiOperation({ summary: 'Mes véhicules déclarés (TRANSPORTER)' })
+  getMyVehicles(@CurrentUser() user: AuthenticatedUser) {
+    return this.vehiclesService.getMine(user.sub);
+  }
+
+  @Post('vehicles')
+  @Roles('TRANSPORTER')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Déclarer un véhicule (type, charge, volume)' })
+  createVehicle(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CreateVehicleDto,
+  ) {
+    return this.vehiclesService.create(user.sub, dto);
+  }
+
+  @Put('vehicles/:id')
+  @Roles('TRANSPORTER')
+  @ApiOperation({ summary: 'Modifier un véhicule (ownership requis)' })
+  updateVehicle(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: UpdateVehicleDto,
+  ) {
+    return this.vehiclesService.update(user.sub, id, dto);
+  }
+
+  @Delete('vehicles/:id')
+  @Roles('TRANSPORTER')
+  @ApiOperation({ summary: 'Désactiver un véhicule (soft delete)' })
+  deleteVehicle(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    return this.vehiclesService.remove(user.sub, id);
   }
 
   // ----------------- LIFECYCLE D'UN SHIPMENT -----------------
@@ -229,5 +293,37 @@ export class LogisticsController {
     @Body() dto: ScanPickupDto,
   ) {
     return this.logisticsService.scanPickup(user.sub, id, dto);
+  }
+
+  // ----------------- ÉVALUATION POST-LIVRAISON -----------------
+
+  @Post('shipments/:id/evaluation')
+  @Roles('BUYER')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary:
+      "Évaluer le transporteur après livraison (BUYER, un seul avis par shipment)",
+  })
+  @ApiResponse({ status: 201, description: 'Avis créé, rating recalculé' })
+  @ApiResponse({ status: 400, description: 'Shipment non DELIVERED' })
+  @ApiResponse({ status: 403, description: "Pas l'acheteur de la commande" })
+  @ApiResponse({ status: 409, description: 'Avis déjà existant' })
+  evaluateShipment(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: EvaluateShipmentDto,
+  ) {
+    return this.logisticsService.evaluateShipment(user.sub, id, dto);
+  }
+
+  @Get('shipments/:id/evaluation')
+  @ApiOperation({
+    summary: "Récupérer l'avis du transporteur si existant (parties à la commande)",
+  })
+  getShipmentEvaluation(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    return this.logisticsService.getShipmentEvaluation(user.sub, id);
   }
 }

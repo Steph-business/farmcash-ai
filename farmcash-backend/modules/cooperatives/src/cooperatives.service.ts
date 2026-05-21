@@ -34,7 +34,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@farmcash/database';
-import { NotificationsService } from '@farmcash/notifications';
+import { NotificationsService, NotificationType } from '@farmcash/notifications';
 import {
   AggregatePublicationDto,
   CoopAnnonceStatus,
@@ -83,7 +83,7 @@ export class CooperativesService {
     this.notifications
       .create({
         user_id: userId,
-        type: 'MARKETPLACE' as any,
+        type: NotificationType.MARKETPLACE,
         titre,
         body,
         data,
@@ -252,8 +252,15 @@ export class CooperativesService {
       throw new ConflictException('Demande déjà traitée.');
     }
 
+    // Récupère le nom de la coop pour le body de la notif (hors-TX).
+    const coopProfile = await this.prisma.cooperative_profiles.findUnique({
+      where: { id: coopId },
+      select: { nom: true },
+    });
+    const coopNom = coopProfile?.nom ?? 'votre coopérative';
+
     if (dto.decision === 'ACCEPTED') {
-      return this.prisma.$transaction(async (tx) => {
+      const result = await this.prisma.$transaction(async (tx) => {
         // 1. Marque la demande
         await tx.coop_join_requests.update({
           where: { id: requestId },
@@ -273,6 +280,23 @@ export class CooperativesService {
         await this.syncFarmerCoopId(tx, req.farmer_id, coopId);
         return { accepted: true };
       });
+
+      // Notif farmer (best-effort).
+      try {
+        await this.notifications.create({
+          user_id: req.farmer_id,
+          type: NotificationType.COOP_JOIN_ACCEPTED,
+          titre: 'Adhésion acceptée',
+          body: `Vous êtes désormais membre de ${coopNom}.`,
+          data: { cooperative_id: coopId },
+        });
+      } catch (err) {
+        this.logger.warn(
+          `Notif COOP_JOIN_ACCEPTED KO farmer=${req.farmer_id}: ${(err as Error).message}`,
+        );
+      }
+
+      return result;
     }
 
     // REJECTED
@@ -285,6 +309,25 @@ export class CooperativesService {
         rejection_reason: dto.rejection_reason,
       },
     });
+
+    // Notif farmer (best-effort).
+    try {
+      const motif = dto.rejection_reason
+        ? ` Motif : ${dto.rejection_reason}`
+        : '';
+      await this.notifications.create({
+        user_id: req.farmer_id,
+        type: NotificationType.COOP_JOIN_REJECTED,
+        titre: 'Adhésion refusée',
+        body: `Votre demande d'adhésion à ${coopNom} a été refusée.${motif}`,
+        data: { cooperative_id: coopId },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Notif COOP_JOIN_REJECTED KO farmer=${req.farmer_id}: ${(err as Error).message}`,
+      );
+    }
+
     return { accepted: false };
   }
 

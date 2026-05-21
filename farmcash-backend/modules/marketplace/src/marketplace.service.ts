@@ -333,12 +333,23 @@ export class MarketplaceService {
     });
     if (!annonce) throw new NotFoundException('Annonce introuvable ou non autorisée.');
 
-    // Une fois VALIDATED ou INCLUDED par la coop, l'annonce est verrouillée.
-    // Seul un statut PENDING (en attente de pesée) ou REJECTED (libéré) ou
-    // null (annonce libre, marketplace public) reste modifiable.
-    if (annonce.coop_status === 'VALIDATED' || annonce.coop_status === 'INCLUDED') {
-      throw new ForbiddenException(
-        'Annonce verrouillée par votre coopérative — modification impossible.',
+    // Dès qu'une annonce est confiée à une coopérative (coop_status non
+    // null, sauf REJECTED qui libère l'annonce), le farmer ne peut plus
+    // la modifier — sinon il pourrait altérer la quantité/prix une fois
+    // que la coop a accepté de la prendre en charge.
+    //   • PENDING   : la coop n'a pas encore décidé → lock pour éviter
+    //                 que le farmer baisse la qty pendant la validation.
+    //   • VALIDATED : la coop a accepté, l'annonce est sous sa responsabilité.
+    //   • INCLUDED  : l'annonce est dans une publication coop agrégée.
+    //   • REJECTED  : la coop a refusé → le farmer reprend la main.
+    //   • null      : annonce libre (marketplace public).
+    if (
+      annonce.coop_status === 'PENDING' ||
+      annonce.coop_status === 'VALIDATED' ||
+      annonce.coop_status === 'INCLUDED'
+    ) {
+      throw new BadRequestException(
+        "Annonce confiée à la coop : modifications impossibles tant que la coop n'a pas rejeté.",
       );
     }
 
@@ -364,9 +375,15 @@ export class MarketplaceService {
       where: { id, farmer_id: userId },
     });
     if (!annonce) throw new NotFoundException('Annonce introuvable ou non autorisée.');
-    if (annonce.coop_status === 'VALIDATED' || annonce.coop_status === 'INCLUDED') {
-      throw new ForbiddenException(
-        'Annonce verrouillée par votre coopérative — suppression impossible.',
+    // Même verrou que updateAnnonceVente : PENDING/VALIDATED/INCLUDED → la coop
+    // est responsable, le farmer ne peut plus supprimer.
+    if (
+      annonce.coop_status === 'PENDING' ||
+      annonce.coop_status === 'VALIDATED' ||
+      annonce.coop_status === 'INCLUDED'
+    ) {
+      throw new BadRequestException(
+        "Annonce confiée à la coop : suppression impossible tant que la coop n'a pas rejeté.",
       );
     }
     await this.prisma.annonces_vente.delete({ where: { id } });
@@ -405,7 +422,14 @@ export class MarketplaceService {
         orderBy: { created_at: 'desc' },
         include: {
           produits_agricoles: { select: { nom: true, unite_mesure: true } },
-          users: { select: { full_name: true, rating: true } },
+          users: {
+            select: {
+              id: true,
+              full_name: true,
+              rating: true,
+              photo_url: true,
+            },
+          },
           regions_ci: { select: { nom: true } },
         },
       }),

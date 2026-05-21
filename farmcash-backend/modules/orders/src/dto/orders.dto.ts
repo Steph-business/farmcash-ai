@@ -143,6 +143,25 @@ export class UpdateOrderStatusDto {
   notes?: string;
 }
 
+// ===================================================================
+//  PAY ORDER (Chantier 4 — paiement d'une commande déjà créée)
+//  ---------------------------------------------------------------------
+//  Typiquement utilisé après acceptation d'une candidature/proposition :
+//  la négociation crée la commande en SENT, le buyer déclenche ensuite
+//  le payin via cette route. Distinct de POST /orders qui combine
+//  création + paiement (achat direct).
+// ===================================================================
+
+export class PayOrderDto {
+  @ApiPropertyOptional({
+    description:
+      "ID du moyen de paiement à utiliser. Si omis : le moyen marqué is_default du buyer.",
+  })
+  @IsOptional()
+  @IsUUID()
+  payment_method_id?: string;
+}
+
 export class ListerOrdersQueryDto {
   @ApiPropertyOptional({ default: 1, minimum: 1 })
   @IsOptional()

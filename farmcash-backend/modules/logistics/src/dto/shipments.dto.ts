@@ -13,6 +13,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsEnum,
+  IsInt,
   IsLatitude,
   IsLongitude,
   IsNotEmpty,
@@ -21,6 +22,8 @@ import {
   IsUrl,
   IsUUID,
   Length,
+  Max,
+  Min,
   ValidateNested,
 } from 'class-validator';
 
@@ -156,4 +159,26 @@ export class ScanPickupDto {
   @ValidateNested()
   @Type(() => GpsPointDto)
   scan_position: GpsPointDto;
+}
+
+// =====================================================================
+//  DTOs : Évaluation post-livraison (Chantier 3 — lacune 3)
+//  ---------------------------------------------------------------------
+//  Le BUYER évalue le TRANSPORTER après réception. Un seul avis par
+//  buyer/shipment (anti-doublon). Recalcule la moyenne `users.rating`.
+// =====================================================================
+
+export class EvaluateShipmentDto {
+  @ApiProperty({ minimum: 1, maximum: 5, example: 5 })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  note: number;
+
+  @ApiPropertyOptional({ description: 'Commentaire libre' })
+  @IsOptional()
+  @IsString()
+  @Length(0, 1000)
+  commentaire?: string;
 }

@@ -46,6 +46,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { mobile_provider, order_status, Prisma } from '@prisma/client';
 import { PrismaService } from '@farmcash/database';
+import { NotificationsService, NotificationType } from '@farmcash/notifications';
 import { PAYMENT_PROVIDER_TOKEN } from './providers/payment-provider.token';
 import type { PaymentProvider } from './providers/payment-provider.interface';
 
@@ -76,6 +77,7 @@ export class FinanceService {
     private readonly config: ConfigService,
     @Inject(PAYMENT_PROVIDER_TOKEN)
     private readonly paymentProvider: PaymentProvider,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /** Pourcentage prélevé au seller (configurable via env). */
@@ -511,7 +513,14 @@ export class FinanceService {
       throw new NotFoundException('Aucun escrow LOCKED à libérer.');
     }
 
-    return this.prisma.$transaction(async (prisma) => {
+    // Collecte des libérations effectuées pour notification hors-TX.
+    const releasedSummaries: Array<{
+      beneficiary_id: string;
+      kind: string;
+      net: Prisma.Decimal;
+    }> = [];
+
+    const txResult = await this.prisma.$transaction(async (prisma) => {
       // Verrouille le wallet buyer une seule fois en tête de TX.
       const buyerWallet = await this.lockWallet(prisma, commande.buyer_id);
 
@@ -523,6 +532,11 @@ export class FinanceService {
         }
 
         const net = escrow.montant.minus(escrow.frais_service);
+        releasedSummaries.push({
+          beneficiary_id: escrow.beneficiary_id,
+          kind: escrow.kind,
+          net,
+        });
 
         // Locks bénéficiaire + treasury (ordre déterministe pour éviter
         // les deadlocks si plusieurs escrows libérés en parallèle).
@@ -628,6 +642,26 @@ export class FinanceService {
         message: `${escrows.length} escrow(s) libéré(s).`,
       };
     });
+
+    // Hors transaction : notifie chaque bénéficiaire du crédit
+    // (best-effort, ne casse pas la libération si la notif échoue).
+    for (const r of releasedSummaries) {
+      try {
+        await this.notifications.create({
+          user_id: r.beneficiary_id,
+          type: NotificationType.WALLET_CREDITED,
+          titre: 'Paiement reçu',
+          body: `Votre wallet a été crédité de ${r.net.toString()} F (escrow ${r.kind} libéré).`,
+          commande_id: commandeId,
+        });
+      } catch (e: any) {
+        this.logger.warn(
+          `Notif WALLET_CREDITED KO user=${r.beneficiary_id} cmd=${commandeId}: ${e?.message ?? e}`,
+        );
+      }
+    }
+
+    return txResult;
   }
 
   async releaseEscrowAdmin(adminId: string, dto: ReleaseEscrowDto) {

@@ -32,6 +32,7 @@ import {
   CreateOrderDto,
   ListerOrdersQueryDto,
   OpenDisputeDto,
+  PayOrderDto,
   ResolveDisputeDto,
   UpdateOrderStatusDto,
 } from './dto/orders.dto';
@@ -62,6 +63,24 @@ export class OrdersController {
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
     return this.ordersService.createOrder(user.sub, dto, idempotencyKey);
+  }
+
+  @Post(':id/pay')
+  @Roles('BUYER')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      "Paie une commande déjà créée (typiquement après acceptation d'une candidature/proposition).",
+    description:
+      "Lance le payin sur une commande SENT existante. Anti-double-paiement : refus si un escrow est déjà LOCKED. Header `Idempotency-Key` accepté pour la retry-safety du transport (le verrouillage applicatif via escrow LOCKED reste la garde-fou principale).",
+  })
+  pay(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: PayOrderDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.ordersService.payOrder(user.sub, id, dto, idempotencyKey);
   }
 
   @Get('my')

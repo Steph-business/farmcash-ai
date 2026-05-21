@@ -53,6 +53,7 @@ export enum MediaTargetType {
   ANNONCE_VENTE = 'ANNONCE_VENTE',
   PUBLICATION_COOP = 'PUBLICATION_COOP',
   LOT = 'LOT',
+  PARCELLE = 'PARCELLE',
 }
 
 export enum MediaKind {

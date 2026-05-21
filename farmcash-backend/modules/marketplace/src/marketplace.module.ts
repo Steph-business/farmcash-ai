@@ -37,6 +37,7 @@ import { InteractionsController } from './interactions.controller';
 import { InteractionsService } from './interactions.service';
 import { PrevisionsController } from './previsions.controller';
 import { PrevisionsService } from './previsions.service';
+import { ReservationsController } from './reservations.controller';
 import { ReservationsExpirationCron } from './reservations-expiration.cron';
 import { PrevisionsReminderCron } from './previsions-reminder.cron';
 
@@ -64,6 +65,7 @@ import { PrevisionsReminderCron } from './previsions-reminder.cron';
     AgronomieController,
     InteractionsController,
     PrevisionsController,
+    ReservationsController,
   ],
   providers: [
     MarketplaceService,

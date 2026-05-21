@@ -27,9 +27,11 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, product_status } from '@prisma/client';
+import { ConfigService } from '@nestjs/config';
+import { randomBytes } from 'node:crypto';
+import { order_status, Prisma, product_status } from '@prisma/client';
 import { PrismaService } from '@farmcash/database';
-import { NotificationsService } from '@farmcash/notifications';
+import { NotificationsService, NotificationType } from '@farmcash/notifications';
 import {
   CreateCandidatureAchatDto,
   CreateContreOffreCoopDto,
@@ -61,6 +63,11 @@ const ALLOWED_TRANSITIONS: Record<NegotiationStatus, NegotiationStatus[]> = {
   CANCELLED: [],
 };
 
+// Frais service par défaut si la config env n'est pas définie.
+// Aligné sur DEFAULT_SERVICE_FEE_PRODUCT d'Orders pour éviter toute
+// divergence entre commande créée via négo vs via marketplace direct.
+const DEFAULT_SERVICE_FEE_PRODUCT = 0.03;
+
 @Injectable()
 export class CandidaturesService {
   private readonly logger = new Logger(CandidaturesService.name);
@@ -68,6 +75,7 @@ export class CandidaturesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly config: ConfigService,
   ) {}
 
   /**
@@ -85,7 +93,7 @@ export class CandidaturesService {
     this.notifications
       .create({
         user_id: userId,
-        type: 'NEGOTIATION' as any,
+        type: NotificationType.NEGOTIATION,
         titre,
         body,
         data,
@@ -240,6 +248,23 @@ export class CandidaturesService {
       }
     }
 
+    // Cas particulier : ACCEPTED par le farmer → on crée immédiatement
+    // la commande au prix négocié, dans la MÊME transaction, et on
+    // marque les autres candidatures PENDING/COUNTER_OFFER sur la même
+    // annonce comme REJECTED_BY_RACE (race-loser).
+    //
+    // TODO Orders : exposer `POST /orders/:id/pay` (ou équivalent) pour
+    // que le buyer puisse déclencher le payin sur une commande SENT
+    // existante. Aujourd'hui le payin n'est lancé QUE depuis `createOrder`.
+    // En attendant, le cleanup automatique des orders SENT > 24h
+    // (cf. OrdersCleanupCron + cleanupOrphanOrders) restitue la
+    // quantité bloquée si le buyer ne paie pas.
+    const shouldCreateOrder =
+      dto.action === NegotiationAction.ACCEPTED && isSeller;
+
+    let createdOrderId: string | null = null;
+    let orderRef: string | null = null;
+
     await this.prisma.$transaction(async (tx) => {
       await tx.candidatures_achat.update({
         where: { id: candidatureId },
@@ -262,6 +287,93 @@ export class CandidaturesService {
           note: dto.note,
         },
       });
+
+      if (shouldCreateOrder) {
+        // Lock l'annonce (FOR UPDATE) pour empêcher une autre acceptation
+        // concurrente sur la même annonce de créer 2 commandes.
+        const annonceRows = await tx.$queryRaw<
+          {
+            id: string;
+            farmer_id: string;
+            quantite_kg: Prisma.Decimal;
+            prix_par_kg: Prisma.Decimal;
+            status: string;
+          }[]
+        >`SELECT id, farmer_id, quantite_kg, prix_par_kg, status
+            FROM annonces_vente
+            WHERE id = ${candidature.annonce_id}::uuid
+            FOR UPDATE`;
+        if (annonceRows.length === 0) {
+          throw new NotFoundException('Annonce introuvable.');
+        }
+        const annonce = annonceRows[0];
+        if (annonce.status !== product_status.ACTIVE) {
+          throw new BadRequestException("L'annonce n'est plus active.");
+        }
+
+        const qty = new Prisma.Decimal(candidature.quantite_kg.toString());
+        const prixKg = new Prisma.Decimal(
+          (candidature.prix_propose_kg ?? annonce.prix_par_kg).toString(),
+        );
+        const annonceQty = new Prisma.Decimal(annonce.quantite_kg.toString());
+        if (qty.greaterThan(annonceQty)) {
+          throw new BadRequestException(
+            `Stock insuffisant (${annonce.quantite_kg} kg dispo).`,
+          );
+        }
+
+        // Idempotency : candidature_id (une candidature => 1 seule cmd).
+        const existing = await tx.commandes_vente.findFirst({
+          where: { idempotency_key: candidatureId },
+          select: { id: true, reference: true },
+        });
+        if (existing) {
+          createdOrderId = existing.id;
+          orderRef = existing.reference;
+        } else {
+          const feeRate = new Prisma.Decimal(
+            this.config.get<string>('SERVICE_FEE_PRODUCT') ??
+              String(DEFAULT_SERVICE_FEE_PRODUCT),
+          );
+          const productAmount = qty.times(prixKg).toDecimalPlaces(2);
+          const productFee = productAmount.times(feeRate).toDecimalPlaces(2);
+          const sellerNet = productAmount.minus(productFee);
+          const ref = `ORD-${Date.now()}-${randomBytes(2).toString('hex')}`;
+
+          const cmd = await tx.commandes_vente.create({
+            data: {
+              reference: ref,
+              buyer_id: candidature.buyer_id,
+              seller_id: annonce.farmer_id,
+              annonce_id: candidature.annonce_id,
+              quantite_kg: qty,
+              prix_unitaire_kg: prixKg,
+              montant_total: productAmount,
+              frais_service: productFee,
+              montant_net: sellerNet,
+              status: order_status.SENT,
+              idempotency_key: candidatureId,
+              notes: "Issue d'une candidature acceptée",
+            },
+          });
+          createdOrderId = cmd.id;
+          orderRef = cmd.reference;
+        }
+
+        // Marque les autres candidatures PENDING/COUNTER_OFFER sur cette
+        // annonce comme REJECTED_BY_RACE (status VARCHAR(30), pas un
+        // enum SQL — on peut écrire une string libre).
+        await tx.candidatures_achat.updateMany({
+          where: {
+            annonce_id: candidature.annonce_id,
+            id: { not: candidatureId },
+            status: {
+              in: [NegotiationStatus.PENDING, NegotiationStatus.COUNTER_OFFER],
+            },
+          },
+          data: { status: 'REJECTED_BY_RACE', updated_at: new Date() },
+        });
+      }
     });
 
     // Notifie l'autre partie. Si c'est le farmer qui a agi, on notifie
@@ -273,12 +385,29 @@ export class CandidaturesService {
       COUNTER_OFFER: { titre: '🔄 Contre-offre reçue',    body: `Nouvelle contre-proposition : ${dto.quantite_kg} kg à ${dto.prix_contre_offre} FCFA/kg.` },
       CANCELLED:     { titre: '🚫 Offre annulée',         body: 'L\'acheteur a annulé son offre.' },
     };
-    const { titre, body } = labels[dto.action];
-    this.notifyNegotiation(recipientId, titre, body, {
-      candidature_id: candidatureId,
-    });
 
-    return { message: `Candidature marquée comme ${dto.action}.` };
+    // Si ACCEPTED par le seller → message enrichi pour le buyer
+    // (commande créée, l'inviter à payer).
+    if (shouldCreateOrder && createdOrderId) {
+      labels.ACCEPTED = {
+        titre: '✅ Votre candidature a été acceptée',
+        body: `Commande ${orderRef ?? ''} créée. Procédez au paiement depuis votre liste de commandes.`,
+      };
+    }
+
+    const { titre, body } = labels[dto.action];
+    const notifData: Record<string, string> = { candidature_id: candidatureId };
+    if (createdOrderId) notifData.commande_id = createdOrderId;
+    this.notifyNegotiation(recipientId, titre, body, notifData);
+
+    const response: Record<string, unknown> = {
+      message: `Candidature marquée comme ${dto.action}.`,
+    };
+    if (createdOrderId) {
+      response.commande_id = createdOrderId;
+      response.reference = orderRef;
+    }
+    return response;
   }
 
   /**
@@ -481,6 +610,17 @@ export class CandidaturesService {
       }
     }
 
+    // Cas particulier : ACCEPTED par le buyer → on crée immédiatement la
+    // commande (symétrique de traiterCandidatureAchat). Les autres
+    // propositions PENDING sur la même annonce_achat sont marquées
+    // REJECTED_BY_RACE. Cf. TODO sur le payin différé dans
+    // traiterCandidatureAchat.
+    const shouldCreateOrder =
+      dto.action === NegotiationAction.ACCEPTED && isBuyer;
+
+    let createdOrderId: string | null = null;
+    let orderRef: string | null = null;
+
     await this.prisma.$transaction(async (tx) => {
       await tx.propositions_vente.update({
         where: { id: propositionId },
@@ -503,6 +643,83 @@ export class CandidaturesService {
           note: dto.note,
         },
       });
+
+      if (shouldCreateOrder) {
+        // Lock l'annonce_achat (FOR UPDATE) — protège contre double
+        // acceptation concurrente de 2 propositions sur la même demande.
+        const annonceRows = await tx.$queryRaw<
+          {
+            id: string;
+            buyer_id: string;
+            is_active: boolean;
+            quantite_kg: Prisma.Decimal;
+          }[]
+        >`SELECT id, buyer_id, is_active, quantite_kg
+            FROM annonces_achat
+            WHERE id = ${prop.annonce_achat_id}::uuid
+            FOR UPDATE`;
+        if (annonceRows.length === 0) {
+          throw new NotFoundException("Demande d'achat introuvable.");
+        }
+        const annonceAchat = annonceRows[0];
+        if (!annonceAchat.is_active) {
+          throw new BadRequestException("La demande d'achat n'est plus active.");
+        }
+
+        const qty = new Prisma.Decimal(prop.quantite_kg.toString());
+        const prixKg = new Prisma.Decimal(prop.prix_propose_kg.toString());
+
+        const existing = await tx.commandes_vente.findFirst({
+          where: { idempotency_key: propositionId },
+          select: { id: true, reference: true },
+        });
+        if (existing) {
+          createdOrderId = existing.id;
+          orderRef = existing.reference;
+        } else {
+          const feeRate = new Prisma.Decimal(
+            this.config.get<string>('SERVICE_FEE_PRODUCT') ??
+              String(DEFAULT_SERVICE_FEE_PRODUCT),
+          );
+          const productAmount = qty.times(prixKg).toDecimalPlaces(2);
+          const productFee = productAmount.times(feeRate).toDecimalPlaces(2);
+          const sellerNet = productAmount.minus(productFee);
+          const ref = `ORD-${Date.now()}-${randomBytes(2).toString('hex')}`;
+
+          const cmd = await tx.commandes_vente.create({
+            data: {
+              reference: ref,
+              buyer_id: annonceAchat.buyer_id,
+              seller_id: prop.vendeur_id,
+              // Si la proposition est rattachée à une annonce_vente du
+              // vendeur, on la relie pour traçabilité.
+              annonce_id: prop.annonce_vente_id ?? null,
+              publication_coop_id: prop.publication_coop_id ?? null,
+              quantite_kg: qty,
+              prix_unitaire_kg: prixKg,
+              montant_total: productAmount,
+              frais_service: productFee,
+              montant_net: sellerNet,
+              status: order_status.SENT,
+              idempotency_key: propositionId,
+              notes: "Issue d'une proposition acceptée",
+            },
+          });
+          createdOrderId = cmd.id;
+          orderRef = cmd.reference;
+        }
+
+        await tx.propositions_vente.updateMany({
+          where: {
+            annonce_achat_id: prop.annonce_achat_id,
+            id: { not: propositionId },
+            status: {
+              in: [NegotiationStatus.PENDING, NegotiationStatus.COUNTER_OFFER],
+            },
+          },
+          data: { status: 'REJECTED_BY_RACE', updated_at: new Date() },
+        });
+      }
     });
 
     const recipientId = isBuyer ? prop.vendeur_id : prop.annonces_achat.buyer_id;
@@ -512,10 +729,30 @@ export class CandidaturesService {
       COUNTER_OFFER: { titre: '🔄 Contre-offre reçue',   body: `Nouvelle contre-proposition : ${dto.quantite_kg} kg à ${dto.prix_contre_offre} FCFA/kg.` },
       CANCELLED:     { titre: '🚫 Proposition annulée',  body: 'Le vendeur a annulé sa proposition.' },
     };
-    const { titre, body } = labels[dto.action];
-    this.notifyNegotiation(recipientId, titre, body, { proposition_id: propositionId });
 
-    return { message: `Proposition marquée comme ${dto.action}.` };
+    // Si ACCEPTED par le buyer → message enrichi pour le vendeur.
+    if (shouldCreateOrder && createdOrderId) {
+      labels.ACCEPTED = {
+        titre: '✅ Votre proposition a été acceptée',
+        body: `Commande ${orderRef ?? ''} créée. L'acheteur va procéder au paiement.`,
+      };
+    }
+
+    const { titre, body } = labels[dto.action];
+    const notifData: Record<string, string> = {
+      proposition_id: propositionId,
+    };
+    if (createdOrderId) notifData.commande_id = createdOrderId;
+    this.notifyNegotiation(recipientId, titre, body, notifData);
+
+    const response: Record<string, unknown> = {
+      message: `Proposition marquée comme ${dto.action}.`,
+    };
+    if (createdOrderId) {
+      response.commande_id = createdOrderId;
+      response.reference = orderRef;
+    }
+    return response;
   }
 
   async listerPropositions(userId: string, query: ListerNegotiationsQueryDto) {

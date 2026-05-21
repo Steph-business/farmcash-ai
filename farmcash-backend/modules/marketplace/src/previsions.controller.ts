@@ -40,6 +40,17 @@ export class PrevisionsController {
     return this.previsionsService.getMesPrevisions(user.sub);
   }
 
+  @Get('reservations/my')
+  @Roles('BUYER')
+  @ApiOperation({
+    summary: 'Lister mes réservations de prévisions (BUYER)',
+    description:
+      'Retourne les réservations effectuées sur des prévisions futures, avec produit + producteur en include.',
+  })
+  getMyReservations(@CurrentUser() user: AuthenticatedUser) {
+    return this.previsionsService.getMyReservations(user.sub);
+  }
+
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @Roles('FARMER')

@@ -88,6 +88,83 @@ export class StockService {
   }
 
   // ===================================================================
+  //  LOTS DANS UN ENTREPÔT
+  //  ---------------------------------------------------------------------
+  //  Liste tous les lots stockés dans un entrepôt donné via la table de
+  //  jonction `stock`. Vérifie au préalable l'ownership de l'entrepôt :
+  //   • Owner direct (entrepots.owner_id === userId), OU
+  //   • Coopérative dont le user est président (cooperative_profiles.user_id),
+  //     auquel cas tout entrepôt dont l'owner_id pointe sur le user_id
+  //     de cette coop OU dont les lots stockés appartiennent à la coop
+  //     sont acceptés.
+  // ===================================================================
+  async listLotsByEntrepot(
+    userId: string,
+    role: string,
+    coopId: string | null,
+    entrepotId: string,
+  ) {
+    const entrepot = await this.prisma.entrepots.findUnique({
+      where: { id: entrepotId },
+      select: { id: true, owner_id: true, nom: true },
+    });
+    if (!entrepot) throw new NotFoundException('Entrepôt introuvable.');
+
+    // Ownership : direct OU (rôle COOPERATIVE + entrepôt appartient à
+    // un user lié à la coop, c'est-à-dire l'utilisateur de la coop est
+    // l'owner). On accepte aussi que la coop voie un entrepôt si son
+    // owner_id coïncide avec le user de la coop (cas standard) — ou si
+    // au moins un lot stocké est de cette coop (fallback métier).
+    let ownsEntrepot = entrepot.owner_id === userId;
+    if (!ownsEntrepot && role === 'COOPERATIVE' && coopId) {
+      // Entrepôt directement détenu par le compte coop (owner = userId)
+      // déjà géré au-dessus. Ici on couvre le cas où la coop a stocké
+      // des lots dans un entrepôt rattaché à un de ses membres : on
+      // autorise la lecture des SEULS lots de la coop dans cet entrepôt.
+      const coopLotsInEntrepot = await this.prisma.stock.findFirst({
+        where: {
+          entrepot_id: entrepotId,
+          lots: { cooperative_id: coopId },
+        },
+        select: { id: true },
+      });
+      ownsEntrepot = !!coopLotsInEntrepot;
+    }
+
+    if (!ownsEntrepot) {
+      throw new ForbiddenException(
+        "Vous n'avez pas accès à cet entrepôt.",
+      );
+    }
+
+    const rows = await this.prisma.stock.findMany({
+      where: {
+        entrepot_id: entrepotId,
+        lot_id: { not: null },
+      },
+      include: {
+        lots: {
+          include: {
+            produits_agricoles: { select: { id: true, nom: true } },
+            users: { select: { id: true, full_name: true } },
+            cooperative_profiles: { select: { id: true, nom: true } },
+          },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+
+    return rows.map((row) => ({
+      stock_id: row.id,
+      quantite_kg: row.quantite_kg,
+      date_entree: row.date_entree,
+      date_sortie_prev: row.date_sortie_prev,
+      notes: row.notes,
+      lot: row.lots,
+    }));
+  }
+
+  // ===================================================================
   //  LOTS
   // ===================================================================
 

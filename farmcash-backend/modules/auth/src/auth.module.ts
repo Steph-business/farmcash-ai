@@ -19,8 +19,13 @@
 import { forwardRef, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
+import { MulterModule } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import { StorageService } from '@farmcash/shared';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { KycController } from './kyc.controller';
+import { KycService } from './kyc.service';
 import { SmsProvider } from './sms.provider';
 import {
   JwtAuthGuard,
@@ -61,10 +66,17 @@ import { CooperativesModule } from '@farmcash/cooperatives';
     // module Cooperatives. forwardRef pour casser le cycle :
     // auth → cooperatives → notifications → (JwtAuthGuard de auth).
     forwardRef(() => CooperativesModule),
+    // Multer en mémoire pour les uploads KYC (image/PDF → MinIO direct).
+    MulterModule.register({
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, KycController],
   providers: [
     AuthService, // logique métier
+    KycService,  // upload KYC + cycle de vie des documents
+    StorageService, // upload MinIO pour les KYC
     SmsProvider, // abstraction de l'envoi SMS
     JwtAuthGuard, // protection des routes par JWT
     OptionalJwtAuthGuard, // variante "best-effort" pour routes publiques
@@ -76,6 +88,7 @@ import { CooperativesModule } from '@farmcash/cooperatives';
     // modules. JwtAuthGuard et RolesGuard sont les plus consommés
     // (Marketplace, Finance, etc. s'en servent pour protéger leurs routes).
     AuthService,
+    KycService,
     JwtAuthGuard,
     OptionalJwtAuthGuard,
     RolesGuard,

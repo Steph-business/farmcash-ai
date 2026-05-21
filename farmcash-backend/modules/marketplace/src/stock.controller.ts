@@ -72,6 +72,22 @@ export class StockController {
     return this.stockService.deleteEntrepot(user.sub, id);
   }
 
+  @Get('entrepots/:id/lots')
+  @ApiOperation({
+    summary: 'Lister les lots stockés dans un entrepôt (ownership requis)',
+  })
+  listLotsByEntrepot(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    return this.stockService.listLotsByEntrepot(
+      user.sub,
+      user.role,
+      user.cooperative_id,
+      id,
+    );
+  }
+
   @Get('lots')
   @ApiOperation({ summary: 'Lister mes lots de production' })
   getMesLots(@CurrentUser() user: AuthenticatedUser) {

@@ -27,7 +27,7 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma, product_status } from '@prisma/client';
 import { PrismaService } from '@farmcash/database';
 import { FinanceService } from '@farmcash/finance';
-import { NotificationsService } from '@farmcash/notifications';
+import { NotificationsService, NotificationType } from '@farmcash/notifications';
 import {
   ConvertPrevisionDto,
   CreatePrevisionDto,
@@ -136,6 +136,26 @@ export class PrevisionsService {
   // ===================================================================
   //  CÔTÉ ACHETEUR
   // ===================================================================
+
+  /**
+   * Liste les réservations du BUYER, avec le détail de la prévision
+   * (produit + farmer) pour affichage côté mobile.
+   * Triées du plus récent au plus ancien.
+   */
+  async getMyReservations(buyerId: string) {
+    return this.prisma.reservations_previsions.findMany({
+      where: { acheteur_id: buyerId },
+      include: {
+        previsions_production: {
+          include: {
+            produits_agricoles: { select: { nom: true } },
+            users: { select: { id: true, full_name: true, photo_url: true } },
+          },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+  }
 
   /**
    * Réservation d'une part de récolte future. Vérifie :
@@ -417,7 +437,7 @@ export class PrevisionsService {
       this.notifications
         .create({
           user_id: r.acheteur_id,
-          type: 'MARKETPLACE' as any,
+          type: NotificationType.MARKETPLACE,
           titre: '🎉 Votre prévision est prête !',
           body: `La récolte est livrable. Payez le solde 90% sous ${this.finalPaymentDays} jours pour confirmer votre lot.`,
           data: {

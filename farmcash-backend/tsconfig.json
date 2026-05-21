@@ -45,7 +45,11 @@
       "@farmcash/oversight": ["modules/oversight/src"],
       "@farmcash/oversight/*": ["modules/oversight/src/*"],
       "@farmcash/cooperatives": ["modules/cooperatives/src"],
-      "@farmcash/cooperatives/*": ["modules/cooperatives/src/*"]
+      "@farmcash/cooperatives/*": ["modules/cooperatives/src/*"],
+      "@farmcash/buyer": ["modules/buyer/src"],
+      "@farmcash/buyer/*": ["modules/buyer/src/*"],
+      "@farmcash/coop-logistics": ["modules/coop-logistics/src"],
+      "@farmcash/coop-logistics/*": ["modules/coop-logistics/src/*"]
     }
   },
   "exclude": ["node_modules", "dist"]

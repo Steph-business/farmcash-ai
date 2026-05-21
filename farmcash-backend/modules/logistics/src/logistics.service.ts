@@ -42,6 +42,7 @@ import {
   UpdateTransporterRouteDto,
 } from './dto/routes.dto';
 import {
+  EvaluateShipmentDto,
   MarkDeliveredDto,
   ScanPickupDto,
   ShipmentStatus,
@@ -239,6 +240,33 @@ export class LogisticsService {
   }
 
   /**
+   * Liste les missions ASSIGNÉES au TRANSPORTER (acceptées + en cours +
+   * livrées). Filtrable par status pour les vues "à charger", "en route",
+   * "historique livré". Trié du plus récent au plus ancien.
+   */
+  async getMyMissions(transporterId: string, status?: ShipmentStatus) {
+    return this.prisma.shipments.findMany({
+      where: {
+        transporter_id: transporterId,
+        ...(status && { status: status as unknown as shipment_status }),
+      },
+      include: {
+        commandes_vente: {
+          select: {
+            reference: true,
+            montant_total: true,
+            buyer_id: true,
+            users_commandes_vente_buyer_idTousers: {
+              select: { full_name: true },
+            },
+          },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+  }
+
+  /**
    * Liste les missions disponibles qui matchent l'une des routes
    * actives du TRANSPORTER. → "Missions dans votre zone".
    */
@@ -334,7 +362,7 @@ export class LogisticsService {
       return result;
     });
 
-    // Hors transaction : affecte escrow + notifie buyer.
+    // Hors transaction : affecte escrow + notifie buyer + seller.
     await this.finance.assignTransportEscrowBeneficiary(
       updated.commande_id,
       transporterId,
@@ -343,6 +371,14 @@ export class LogisticsService {
       target: 'buyer',
       titre: 'Votre commande va être livrée 🚚',
       body: 'Un transporteur a accepté votre livraison.',
+    });
+    // Notif farmer/seller : il doit savoir qu'un transporteur va venir
+    // récupérer la marchandise (préparer l'expédition, QR code, etc.).
+    await this.safeNotify(updated.commande_id, {
+      target: 'seller',
+      titre: 'Transporteur assigné',
+      body: 'Un transporteur prend en charge votre livraison.',
+      type: NotificationType.SHIPMENT_ACCEPTED,
     });
 
     return updated;
@@ -758,23 +794,157 @@ export class LogisticsService {
       );
     }
 
-    // 7. Notifier le producteur (best-effort)
+    // 7. Notifier le producteur (best-effort) — type PICKUP_CONFIRMED
+    //    pour distinguer du WALLET_CREDITED générique émis par Finance.
     try {
       await this.notifications.create({
         user_id: shipment.commandes_vente.seller_id,
-        type: NotificationType.PAYMENT,
-        titre: 'Marchandise enlevée — argent disponible',
-        body: "Le transporteur a confirmé l'enlèvement. Votre paiement est crédité.",
+        type: NotificationType.PICKUP_CONFIRMED,
+        titre: 'Marchandise enlevée',
+        body: "Le transporteur a confirmé l'enlèvement. Votre paiement a été libéré.",
         shipment_id: shipmentId,
         commande_id: shipment.commande_id,
       });
     } catch (err) {
       this.logger.warn(
-        `Notification PAYMENT_RELEASED failed for ${shipmentId}: ${(err as Error).message}`,
+        `Notification PICKUP_CONFIRMED failed for ${shipmentId}: ${(err as Error).message}`,
       );
     }
 
     return { shipment: result, escrow_released: releasePayload };
+  }
+
+  // ===================================================================
+  //  ÉVALUATION POST-LIVRAISON (Chantier 3 — lacune 3)
+  //  ---------------------------------------------------------------------
+  //  Le BUYER évalue le TRANSPORTER après réception. Un seul avis par
+  //  buyer/shipment. Recalcule users.rating + users.rating_count.
+  // ===================================================================
+
+  async evaluateShipment(
+    buyerId: string,
+    shipmentId: string,
+    dto: EvaluateShipmentDto,
+  ) {
+    // 1. Charger shipment + commande pour vérifier ownership + statut
+    const shipment = await this.prisma.shipments.findUnique({
+      where: { id: shipmentId },
+      include: { commandes_vente: true },
+    });
+    if (!shipment) throw new NotFoundException('Shipment introuvable.');
+    if (shipment.status !== shipment_status.DELIVERED) {
+      throw new BadRequestException(
+        `Évaluation impossible : statut shipment = ${shipment.status}.`,
+      );
+    }
+    if (!shipment.transporter_id) {
+      throw new BadRequestException('Shipment sans transporteur assigné.');
+    }
+    if (shipment.commandes_vente.buyer_id !== buyerId) {
+      throw new ForbiddenException(
+        "Seul l'acheteur de la commande peut évaluer le transporteur.",
+      );
+    }
+
+    // 2. Anti-doublon : un seul avis SHIPMENT par buyer/shipment
+    const existing = await this.prisma.avis.findFirst({
+      where: {
+        context_type: 'SHIPMENT',
+        context_id: shipmentId,
+        reviewer_id: buyerId,
+      },
+    });
+    if (existing) {
+      throw new ConflictException('Vous avez déjà évalué ce transporteur.');
+    }
+
+    const transporterId = shipment.transporter_id;
+
+    // 3. Création de l'avis + recalcul du rating dans une transaction
+    const created = await this.prisma.$transaction(async (tx) => {
+      const avis = await tx.avis.create({
+        data: {
+          reviewer_id: buyerId,
+          reviewed_user_id: transporterId,
+          context_type: 'SHIPMENT',
+          context_id: shipmentId,
+          note: dto.note,
+          commentaire: dto.commentaire ?? null,
+        },
+      });
+
+      // Recalcul AVG + COUNT sur tous les avis du transporteur
+      const agg = await tx.avis.aggregate({
+        where: { reviewed_user_id: transporterId },
+        _avg: { note: true },
+        _count: { _all: true },
+      });
+      const avgNote = agg._avg.note ?? 0;
+      const count = agg._count._all;
+      await tx.users.update({
+        where: { id: transporterId },
+        data: {
+          rating: new Prisma.Decimal(Number(avgNote).toFixed(2)),
+          rating_count: count,
+        },
+      });
+
+      return avis;
+    });
+
+    this.logger.log(
+      `Avis SHIPMENT ${created.id} créé par buyer=${buyerId} sur transporter=${transporterId} (note=${dto.note})`,
+    );
+
+    // 4. Notif au transporteur (best-effort)
+    try {
+      await this.notifications.create({
+        user_id: transporterId,
+        type: NotificationType.SYSTEM,
+        titre: 'Nouvel avis reçu',
+        body: `Vous avez reçu une note de ${dto.note}/5 pour une livraison.`,
+        shipment_id: shipmentId,
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Notif évaluation transporter ${transporterId} KO: ${(err as Error).message}`,
+      );
+    }
+
+    return created;
+  }
+
+  /**
+   * GET /logistics/shipments/:id/evaluation — retourne l'avis si existant
+   * pour le shipment. Accessible aux parties prenantes (buyer / seller /
+   * transporter de la commande).
+   */
+  async getShipmentEvaluation(userId: string, shipmentId: string) {
+    const shipment = await this.prisma.shipments.findUnique({
+      where: { id: shipmentId },
+      include: { commandes_vente: true },
+    });
+    if (!shipment) throw new NotFoundException('Shipment introuvable.');
+    const parties = new Set([
+      shipment.commandes_vente.buyer_id,
+      shipment.commandes_vente.seller_id,
+      shipment.transporter_id,
+    ]);
+    if (!parties.has(userId)) {
+      throw new ForbiddenException('Accès refusé.');
+    }
+
+    return this.prisma.avis.findFirst({
+      where: {
+        context_type: 'SHIPMENT',
+        context_id: shipmentId,
+      },
+      include: {
+        users_avis_reviewer_idTousers: {
+          select: { id: true, full_name: true },
+        },
+      },
+    });
   }
 
   // ===================================================================
@@ -850,10 +1020,10 @@ export class LogisticsService {
         await this.notifications
           .create({
             user_id: route.transporter_id,
-            type: 'SYSTEM',
+            type: NotificationType.SYSTEM,
             titre: 'Nouvelle mission disponible 🚚',
             body: `${shipment.origin_zone} → ${shipment.destination_zone}, ${shipment.quantite_kg}kg`,
-          } as any)
+          })
           .catch(() => undefined);
       }
     } catch (err) {
@@ -865,7 +1035,12 @@ export class LogisticsService {
 
   private async safeNotify(
     commandeId: string,
-    payload: { target: 'buyer' | 'seller'; titre: string; body: string },
+    payload: {
+      target: 'buyer' | 'seller';
+      titre: string;
+      body: string;
+      type?: NotificationType;
+    },
   ): Promise<void> {
     try {
       const cmd = await this.prisma.commandes_vente.findUnique({
@@ -876,11 +1051,11 @@ export class LogisticsService {
       const userId = payload.target === 'buyer' ? cmd.buyer_id : cmd.seller_id;
       await this.notifications.create({
         user_id: userId,
-        type: 'SYSTEM',
+        type: payload.type ?? NotificationType.SYSTEM,
         titre: payload.titre,
         body: payload.body,
         commande_id: commandeId,
-      } as any);
+      });
     } catch (err) {
       this.logger.warn(`Notification failed: ${(err as Error).message}`);
     }

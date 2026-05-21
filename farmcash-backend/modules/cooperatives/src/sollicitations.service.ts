@@ -35,7 +35,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@farmcash/database';
-import { NotificationsService } from '@farmcash/notifications';
+import { NotificationsService, NotificationType } from '@farmcash/notifications';
 import { SmsProvider } from '@farmcash/auth';
 import {
   CreateSollicitationDto,
@@ -476,7 +476,7 @@ export class SollicitationsService {
       throw new BadRequestException('quantite_kg requis si action=ACCEPTED.');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const txResult = await this.prisma.$transaction(async (tx) => {
       // 1. Update la ligne destinataire
       await tx.sollicitation_recipients.update({
         where: { id: recipient.id },
@@ -550,6 +550,119 @@ export class SollicitationsService {
           : refreshed?.status ?? SollicitationStatus.OPEN,
       };
     });
+
+    // 4. Notifier la coop INITIATRICE à chaque réponse (best-effort).
+    //    Le initiated_by est le user_id du compte coop qui a créé la
+    //    sollicitation. On récupère aussi le nom du répondant pour
+    //    enrichir le body.
+    try {
+      const responder = await this.prisma.users.findUnique({
+        where: { id: userId },
+        select: { full_name: true, phone: true },
+      });
+      const responderName =
+        responder?.full_name?.trim() || responder?.phone || 'Un membre';
+      const body =
+        dto.action === 'ACCEPTED'
+          ? `${responderName} propose ${dto.quantite_kg ?? 0} kg.`
+          : `${responderName} a décliné la sollicitation.`;
+      await this.notifications.create({
+        user_id: recipient.sollicitations_coop.initiated_by,
+        type: NotificationType.COOP_SOLLICITATION_RESPONSE,
+        titre: 'Nouvelle réponse reçue',
+        body,
+        data: {
+          sollicitation_id: sollicitId,
+          recipient_id: recipient.id,
+          response_action: dto.action,
+          response_quantite_kg:
+            dto.action === 'ACCEPTED' ? dto.quantite_kg : null,
+          responder_id: userId,
+        },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Notif COOP_SOLLICITATION_RESPONSE KO sollicit=${sollicitId}: ${(err as Error).message}`,
+      );
+    }
+
+    return txResult;
+  }
+
+  // ===================================================================
+  //  CONFIRMATION par la coop initiatrice d'une réponse ACCEPTED
+  //  ---------------------------------------------------------------------
+  //  Une fois qu'un destinataire a répondu ACCEPTED, la coop doit
+  //  contractualiser l'engagement : on bascule la ligne destinataire en
+  //  CONFIRMED_BY_COOP avec un timestamp et on notifie l'engagé.
+  // ===================================================================
+
+  async acceptRecipientResponse(
+    userId: string,
+    sollicitId: string,
+    recipientId: string,
+  ) {
+    // 1. Charger la sollicitation et vérifier que userId est l'initiatrice
+    const sollicit = await this.prisma.sollicitations_coop.findUnique({
+      where: { id: sollicitId },
+      include: {
+        cooperative_profiles: { select: { id: true, user_id: true, nom: true } },
+      },
+    });
+    if (!sollicit) throw new NotFoundException('Sollicitation introuvable.');
+    if (sollicit.cooperative_profiles.user_id !== userId) {
+      throw new ForbiddenException(
+        "Seule la coop initiatrice peut confirmer une réponse.",
+      );
+    }
+
+    // 2. Charger la ligne destinataire et vérifier qu'elle appartient bien
+    //    à la sollicitation + qu'elle a accepté (et pas encore confirmée).
+    const recipient = await this.prisma.sollicitation_recipients.findUnique({
+      where: { id: recipientId },
+    });
+    if (!recipient || recipient.sollicitation_id !== sollicitId) {
+      throw new NotFoundException('Destinataire introuvable pour cette sollicitation.');
+    }
+    if (recipient.response_action !== 'ACCEPTED') {
+      throw new BadRequestException(
+        `Impossible de confirmer : réponse actuelle = ${recipient.response_action ?? 'NONE'}.`,
+      );
+    }
+    if (recipient.confirmed_by_coop_at) {
+      throw new ConflictException('Engagement déjà confirmé par la coop.');
+    }
+
+    // 3. Update + notification dans une transaction
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.sollicitation_recipients.update({
+        where: { id: recipientId },
+        data: {
+          response_action: 'CONFIRMED_BY_COOP',
+          confirmed_by_coop_at: new Date(),
+        },
+      });
+      await tx.notifications.create({
+        data: {
+          user_id: recipient.user_id,
+          type: 'COOP_SOLLICITATION_CONFIRMED',
+          titre: 'Engagement confirmé',
+          body: `${sollicit.cooperative_profiles.nom} a confirmé votre engagement.`,
+          data: {
+            sollicitation_id: sollicitId,
+            recipient_id: recipientId,
+          } as Prisma.InputJsonValue,
+          sent_at: new Date(),
+        },
+      });
+      return result;
+    });
+
+    this.logger.log(
+      `Sollicitation ${sollicitId} : engagement recipient=${recipientId} CONFIRMED_BY_COOP par user=${userId}`,
+    );
+
+    return updated;
   }
 
   // ===================================================================

@@ -29,6 +29,23 @@ export enum NotificationType {
   NEGOTIATION = 'NEGOTIATION',
   SHIPMENT = 'SHIPMENT',
   MARKETPLACE = 'MARKETPLACE',
+  // Événements wallet — émis par Finance à la libération d'un escrow
+  // (cf. releaseEscrow → notif au bénéficiaire crédité).
+  WALLET_CREDITED = 'WALLET_CREDITED',
+  WALLET_TOPUP_SUCCESS = 'WALLET_TOPUP_SUCCESS',
+  // Logistique — distinct de SHIPMENT générique, pour cibler le pickup
+  // confirmé (le producteur sait que sa marchandise a quitté son champ).
+  PICKUP_CONFIRMED = 'PICKUP_CONFIRMED',
+  // Émis quand un transporter accepte la mission d'un shipment.
+  SHIPMENT_ACCEPTED = 'SHIPMENT_ACCEPTED',
+  // Workflow coopératives — demandes d'adhésion + sollicitations.
+  COOP_JOIN_ACCEPTED = 'COOP_JOIN_ACCEPTED',
+  COOP_JOIN_REJECTED = 'COOP_JOIN_REJECTED',
+  COOP_SOLLICITATION_RESPONSE = 'COOP_SOLLICITATION_RESPONSE',
+  COOP_SOLLICITATION_FULFILLED = 'COOP_SOLLICITATION_FULFILLED',
+  // Émis quand une candidature/proposition acceptée crée une commande
+  // (le buyer reçoit l'ID de la nouvelle commande à payer).
+  ORDER_FROM_NEGOTIATION = 'ORDER_FROM_NEGOTIATION',
 }
 
 /**

@@ -122,7 +122,7 @@ export class InteractionsController {
         file: { type: 'string', format: 'binary' },
         target_type: {
           type: 'string',
-          enum: ['ANNONCE_VENTE', 'PUBLICATION_COOP', 'LOT'],
+          enum: ['ANNONCE_VENTE', 'PUBLICATION_COOP', 'LOT', 'PARCELLE'],
         },
         target_id: { type: 'string', format: 'uuid' },
         type: {

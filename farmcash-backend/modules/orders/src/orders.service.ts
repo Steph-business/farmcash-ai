@@ -49,13 +49,14 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '@farmcash/database';
 import { FinanceService } from '@farmcash/finance';
-import { NotificationsService } from '@farmcash/notifications';
+import { NotificationsService, NotificationType } from '@farmcash/notifications';
 import {
   CreateOrderDto,
   ListerOrdersQueryDto,
   OpenDisputeDto,
   OrderSourceType,
   OrderStatus,
+  PayOrderDto,
   ResolveDisputeDto,
   UpdateOrderStatusDto,
 } from './dto/orders.dto';
@@ -317,7 +318,7 @@ export class OrdersService {
       // Compensation : annule la commande + restore le stock.
       await this.cancelOrderCompensation(order.id, 'PAYIN_FAILED');
       await this.safeNotify(buyerId, {
-        type: 'SYSTEM',
+        type: NotificationType.SYSTEM,
         titre: 'Échec du paiement',
         body: `La commande ${orderRef} a été annulée — paiement refusé.`,
         commande_id: order.id,
@@ -326,13 +327,100 @@ export class OrdersService {
     }
 
     await this.safeNotify(reference.sellerId, {
-      type: 'SYSTEM',
+      type: NotificationType.SYSTEM,
       titre: 'Nouvelle commande 📦',
       body: `Commande ${orderRef} reçue pour ${dto.quantite_kg}kg.`,
       commande_id: order.id,
     });
 
     return order;
+  }
+
+  // ===================================================================
+  //  PAIEMENT D'UNE COMMANDE EXISTANTE  (Chantier 4)
+  //  ---------------------------------------------------------------------
+  //  Avec la négociation atomique (cf. CandidaturesService), une commande
+  //  peut être créée en SENT sans déclenchement immédiat du payin (le
+  //  buyer doit confirmer le paiement). Cette méthode comble ce gap :
+  //   • Vérifie ownership (buyer_id).
+  //   • Vérifie status = SENT (pas déjà payée/annulée).
+  //   • Vérifie qu'aucun escrow LOCKED n'existe (anti-double-paiement).
+  //   • Délègue à finance.processPayin (réutilise le path existant).
+  // ===================================================================
+
+  async payOrder(
+    buyerId: string,
+    orderId: string,
+    dto: PayOrderDto,
+    idempotencyKey?: string,
+  ) {
+    const order = await this.prisma.commandes_vente.findUnique({
+      where: { id: orderId },
+    });
+    if (!order) throw new NotFoundException('Commande introuvable.');
+    if (order.buyer_id !== buyerId) {
+      throw new ForbiddenException('Cette commande ne vous appartient pas.');
+    }
+    if (order.status !== order_status.SENT) {
+      throw new BadRequestException(
+        `Commande au statut ${order.status} : paiement impossible (SENT requis).`,
+      );
+    }
+
+    // Anti-double-paiement : si un escrow LOCKED existe déjà sur cette
+    // commande, c'est qu'un payin a abouti — refuser un 2e tour. Le
+    // status SENT seul ne suffit pas (race : payin a confirmé l'escrow
+    // mais la transition SENT→ACCEPTED a échoué — peu probable mais
+    // possible, on ferme la porte).
+    const existingEscrow = await this.prisma.escrow_conditions.findFirst({
+      where: { commande_id: orderId, status: 'LOCKED' },
+      select: { id: true },
+    });
+    if (existingEscrow) {
+      throw new ConflictException(
+        'Cette commande a déjà été payée (escrow LOCKED).',
+      );
+    }
+
+    const paymentMethod = await this.resolvePaymentMethod(
+      buyerId,
+      dto.payment_method_id,
+    );
+
+    // Idempotency-Key transport-level : si la TX a déjà été créée avec
+    // cette clé, processPayin lèvera son propre check via le UNIQUE
+    // INDEX sur transactions.idempotency_key. On loggue le ref pour
+    // que l'observabilité puisse corréler.
+    if (idempotencyKey) {
+      this.logger.log(
+        `payOrder idempotency-key=${idempotencyKey} order=${orderId}`,
+      );
+    }
+
+    try {
+      await this.finance.processPayin(buyerId, {
+        commande_id: orderId,
+        buyer_id: buyerId,
+        payment_method_id: paymentMethod.id,
+        from_reservation_id: order.from_reservation_id ?? undefined,
+      });
+    } catch (err) {
+      this.logger.error(
+        `payOrder: payin failed order=${orderId}: ${(err as Error).message}`,
+      );
+      // Pas de cancel automatique ici : la commande reste SENT, le buyer
+      // peut retenter avec un autre moyen de paiement. Le cleanup cron
+      // (cleanupOrphanOrders) finira par l'annuler si elle reste SENT
+      // > 24h. Si on cancellait à chaque échec, le buyer ne pourrait
+      // plus retry après un timeout réseau.
+      throw err;
+    }
+
+    return {
+      message: 'Paiement confirmé.',
+      commande_id: orderId,
+      reference: order.reference,
+    };
   }
 
   /**
@@ -558,7 +646,7 @@ export class OrdersService {
       ? result.order.seller_id
       : result.order.buyer_id;
     await this.safeNotify(recipientId, {
-      type: 'SYSTEM',
+      type: NotificationType.SYSTEM,
       titre: `Commande ${result.order.reference} : ${dto.status}`,
       body: `Statut mis à jour : ${dto.status}.`,
       commande_id: result.order.id,
@@ -954,7 +1042,7 @@ export class OrdersService {
   private async safeNotify(
     userId: string,
     payload: {
-      type: string;
+      type: NotificationType;
       titre: string;
       body: string;
       commande_id?: string;
@@ -963,11 +1051,11 @@ export class OrdersService {
     try {
       await this.notifications.create({
         user_id: userId,
-        type: payload.type as any,
+        type: payload.type,
         titre: payload.titre,
         body: payload.body,
         commande_id: payload.commande_id,
-      } as any);
+      });
     } catch (err) {
       this.logger.warn(`Notification failed for ${userId}: ${(err as Error).message}`);
     }

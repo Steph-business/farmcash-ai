@@ -203,6 +203,8 @@ export class InteractionsService {
         publication_coop_id:
           dto.target_type === MediaTargetType.PUBLICATION_COOP ? dto.target_id : null,
         lot_id: dto.target_type === MediaTargetType.LOT ? dto.target_id : null,
+        parcelle_id:
+          dto.target_type === MediaTargetType.PARCELLE ? dto.target_id : null,
         url: dto.url,
         thumbnail_url: dto.thumbnail_url,
         media_type: dto.type,
@@ -259,7 +261,9 @@ export class InteractionsService {
         ? `annonces/${targetId}`
         : targetType === MediaTargetType.PUBLICATION_COOP
           ? `publications/${targetId}`
-          : `lots/${targetId}`;
+          : targetType === MediaTargetType.PARCELLE
+            ? `parcelles/${targetId}`
+            : `lots/${targetId}`;
 
     const asset = await this.storage.upload(folder, file);
 
@@ -270,6 +274,8 @@ export class InteractionsService {
         publication_coop_id:
           targetType === MediaTargetType.PUBLICATION_COOP ? targetId : null,
         lot_id: targetType === MediaTargetType.LOT ? targetId : null,
+        parcelle_id:
+          targetType === MediaTargetType.PARCELLE ? targetId : null,
         url: asset.url,
         thumbnail_url: asset.url,
         media_type: kind,
@@ -297,9 +303,14 @@ export class InteractionsService {
         ? MediaTargetType.PUBLICATION_COOP
         : media.lot_id
           ? MediaTargetType.LOT
-          : null;
+          : media.parcelle_id
+            ? MediaTargetType.PARCELLE
+            : null;
     const targetId =
-      media.annonce_vente_id ?? media.publication_coop_id ?? media.lot_id;
+      media.annonce_vente_id ??
+      media.publication_coop_id ??
+      media.lot_id ??
+      media.parcelle_id;
     if (!targetType || !targetId) {
       throw new BadRequestException('Média sans cible identifiable.');
     }
@@ -354,6 +365,15 @@ export class InteractionsService {
           select: { id: true },
         });
         if (!ok) throw new ForbiddenException("Vous n'êtes pas propriétaire du lot.");
+        return;
+      }
+      case MediaTargetType.PARCELLE: {
+        const ok = await this.prisma.parcelle.findFirst({
+          where: { id: targetId, user_id: userId },
+          select: { id: true },
+        });
+        if (!ok)
+          throw new ForbiddenException("Vous n'êtes pas propriétaire de la parcelle.");
         return;
       }
     }
