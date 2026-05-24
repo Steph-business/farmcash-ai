@@ -26,25 +26,38 @@ export class PanierService {
    * n'existe pas — un seul panier par user (contrainte UNIQUE user_id).
    */
   async getMonPanier(userId: string) {
-    let panier = await this.prisma.panier.findUnique({
-      where: { user_id: userId },
-      include: {
-        panier_items: {
-          include: {
-            annonces_vente: {
-              select: { titre: true, prix_par_kg: true, status: true },
+    // Include annonces_vente *complet* avec ses relations jointes
+    // (produits_agricoles, users vendeur, regions_ci, villes_ci, medias).
+    // L'UI mobile (`PanierItem.annonce`) attend l'objet complet pour
+    // afficher photo / vendeur / localisation / prix sur les cards
+    // du panier — un select restreint fait crasher le parser freezed.
+    const include = {
+      panier_items: {
+        include: {
+          annonces_vente: {
+            include: {
+              produits_agricoles: { select: { nom: true, unite_mesure: true } },
+              users: {
+                select: { id: true, full_name: true, rating: true, photo_url: true },
+              },
+              regions_ci: { select: { nom: true } },
+              villes_ci: { select: { nom: true } },
+              medias: { select: { url: true, thumbnail_url: true }, take: 3 },
             },
           },
         },
       },
+    } as const;
+
+    let panier = await this.prisma.panier.findUnique({
+      where: { user_id: userId },
+      include,
     });
 
     if (!panier) {
       panier = await this.prisma.panier.create({
         data: { user_id: userId },
-        include: {
-          panier_items: { include: { annonces_vente: true } },
-        },
+        include,
       });
     }
 

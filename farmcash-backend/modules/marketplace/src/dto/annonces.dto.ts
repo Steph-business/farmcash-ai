@@ -184,6 +184,16 @@ export class CreateAnnonceVenteDto {
   @IsDateString()
   disponible_jusqu?: string;
 
+  /**
+   * Date à laquelle le produit a été récolté. Affichée à l'acheteur
+   * pour qu'il évalue la fraîcheur. Distincte de `disponible_jusqu`
+   * qui borne la durée de l'offre côté producteur.
+   */
+  @ApiPropertyOptional({ example: '2025-05-15' })
+  @IsOptional()
+  @IsDateString()
+  date_recolte?: string;
+
   // Coordonnées OBLIGATOIRES pour la recherche géographique.
   // Pas de fallback "Abidjan" → on évite de polluer la carte.
   @ApiProperty({ type: CoordinatesDto })
@@ -203,6 +213,25 @@ export class CreateAnnonceVenteDto {
   @IsOptional()
   @IsUUID()
   assigned_to_cooperative_id?: string;
+
+  /**
+   * Si une COOPERATIVE publie « au nom de » un producteur géré qui n'a
+   * pas de téléphone, elle renseigne ici l'UUID du farmer cible. Le
+   * service vérifie que ce farmer est bien `managed_by_coop_id = <coop>`
+   * — sinon ForbiddenException.
+   *
+   * Réservé aux COOPERATIVE. Si un FARMER l'envoie → BadRequestException.
+   * Si absent et que l'appelant est COOPERATIVE → BadRequestException
+   * (les vrais COOP publient leurs stocks via /coop/publications, pas via
+   * /marketplace/annonces/vente).
+   */
+  @ApiPropertyOptional({
+    description:
+      "UUID du farmer géré pour qui la COOP publie (réservé aux comptes COOPERATIVE)",
+  })
+  @IsOptional()
+  @IsUUID()
+  act_as_farmer_id?: string;
 
   /**
    * Liste des produits de traitement appliqués sur ce lot (transparence
@@ -375,6 +404,17 @@ export class ListerAnnoncesVenteQueryDto {
   @IsOptional()
   @IsEnum(ProductQuality)
   qualite?: ProductQuality;
+
+  /**
+   * Filtre par farmer (vendeur). Utilisé par la page "Profil vendeur"
+   * côté acheteur pour afficher toutes les annonces d'un producteur,
+   * et par la page "Mes publications" côté producteur pour ne lister
+   * que ses propres annonces.
+   */
+  @ApiPropertyOptional({ description: 'UUID du farmer/vendeur' })
+  @IsOptional()
+  @IsUUID()
+  farmer_id?: string;
 }
 
 /**

@@ -252,11 +252,19 @@ export class SollicitationsService {
 
     // 5. SMS HORS transaction (best effort — on ne fail pas la création
     //    si le provider SMS est down ou non câblé en prod).
+    // On ne sollicite QUE les users avec un téléphone (les farmers
+    // gérés par coop ont phone=null → exclus du SMS).
     const phones = await this.prisma.users.findMany({
-      where: { id: { in: dedupedRecipients.map((r) => r.user_id) } },
+      where: {
+        id: { in: dedupedRecipients.map((r) => r.user_id) },
+        phone: { not: null },
+      },
       select: { id: true, phone: true },
     });
     for (const u of phones) {
+      // Le filtre Prisma garantit phone non-null, mais TS reste strict
+      // (non_null_assertion explicite pour rassurer le compilateur).
+      if (!u.phone) continue;
       try {
         await this.smsProvider.send(
           u.phone,

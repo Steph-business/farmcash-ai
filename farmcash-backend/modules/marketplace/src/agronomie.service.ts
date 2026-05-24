@@ -12,6 +12,7 @@
 
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -37,10 +38,43 @@ export class AgronomieService {
     });
   }
 
+  /**
+   * Crée une parcelle pour le producteur.
+   *
+   * Anti-doublons : si le user a déjà créé une parcelle avec le même
+   * `nom` (case-insensitive) dans les 60 dernières secondes, on refuse
+   * avec un `409 Conflict`. Cible le cas concret d'un double-tap UI ou
+   * d'un retry réseau client qui réessaie un POST déjà commit côté DB.
+   * Deux parcelles homonymes légitimes (créées à des jours différents)
+   * restent autorisées — c'est une protection ANTI-RETRY, pas une
+   * contrainte d'unicité métier.
+   *
+   * Retour : l'ENTITÉ Parcelle complète (et non plus `{ message, id }`)
+   * pour que le client puisse parser directement sans round-trip GET.
+   * Le client mobile reposait sur ce contrat — l'ancienne shape causait
+   * un crash de `Parcelle.fromJson` et faisait croire à un échec, ce
+   * qui poussait le user à re-cliquer et créait un vrai doublon en DB.
+   */
   async createParcelle(userId: string, dto: CreateParcelleDto) {
-    // PostGIS : on insère via $executeRaw quand un centroid est fourni
+    const sixtySecondsAgo = new Date(Date.now() - 60_000);
+    const recent = await this.prisma.parcelle.findFirst({
+      where: {
+        user_id: userId,
+        nom: { equals: dto.nom, mode: 'insensitive' },
+        created_at: { gte: sixtySecondsAgo },
+      },
+      select: { id: true },
+    });
+    if (recent) {
+      throw new ConflictException(
+        'Une parcelle avec ce nom vient déjà d\'être créée. Vérifie dans "Mes parcelles".',
+      );
+    }
+
+    // PostGIS : on insère via $queryRaw quand un centroid est fourni
     // pour stocker le Point(lng, lat). Sinon création « classique »
     // sans géoloc — utile pour les parcelles enregistrées hors GPS.
+    let createdId: string;
     if (dto.centroid) {
       const rows = await this.prisma.$queryRaw<{ id: string }[]>`
         INSERT INTO parcelle (user_id, nom, superficie_ha, produit_id, centroid)
@@ -53,17 +87,33 @@ export class AgronomieService {
         )
         RETURNING id;
       `;
-      return { message: 'Parcelle créée avec succès.', id: rows[0]?.id };
+      const id = rows[0]?.id;
+      if (!id) {
+        throw new BadRequestException('Création de parcelle échouée.');
+      }
+      createdId = id;
+    } else {
+      const parcelle = await this.prisma.parcelle.create({
+        data: {
+          user_id: userId,
+          nom: dto.nom,
+          superficie_ha: dto.superficie_ha,
+          ...(dto.produit_id && { produit_id: dto.produit_id }),
+        },
+      });
+      createdId = parcelle.id;
     }
-    const parcelle = await this.prisma.parcelle.create({
-      data: {
-        user_id: userId,
-        nom: dto.nom,
-        superficie_ha: dto.superficie_ha,
-        ...(dto.produit_id && { produit_id: dto.produit_id }),
-      },
+
+    // SELECT final → on renvoie l'entité Prisma standard, identique en
+    // shape à ce que `getMesParcelles` retourne. Le mobile peut donc
+    // utiliser le même parser `Parcelle.fromJson` que pour la liste.
+    const created = await this.prisma.parcelle.findUnique({
+      where: { id: createdId },
     });
-    return { message: 'Parcelle créée avec succès.', id: parcelle.id };
+    if (!created) {
+      throw new BadRequestException('Parcelle créée mais introuvable.');
+    }
+    return created;
   }
 
   async updateParcelle(userId: string, id: string, dto: UpdateParcelleDto) {

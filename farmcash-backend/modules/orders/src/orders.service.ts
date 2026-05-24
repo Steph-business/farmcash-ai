@@ -130,6 +130,33 @@ export class OrdersService {
       throw new BadRequestException("Vous ne pouvez pas acheter à vous-même.");
     }
 
+    // 1.bis Anti-doublons côté buyer : un même buyer ne peut pas avoir
+    // 2 commandes ACTIVES (SENT/ACCEPTED/IN_PROGRESS) sur la même
+    // annonce. Évite les re-clics, les double-tap, et les confusions
+    // type "j'ai pas vu que c'était passé, je clique encore". La colonne
+    // côté DB s'appelle `annonce_id` (pas `annonce_vente_id`).
+    if (dto.annonce_vente_id) {
+      const existingActive = await this.prisma.commandes_vente.findFirst({
+        where: {
+          buyer_id: buyerId,
+          annonce_id: dto.annonce_vente_id,
+          status: {
+            in: [
+              order_status.SENT,
+              order_status.ACCEPTED,
+              order_status.IN_PROGRESS,
+            ],
+          },
+        },
+        select: { id: true, status: true },
+      });
+      if (existingActive) {
+        throw new ConflictException(
+          `Tu as déjà une commande en cours sur cette annonce (#${existingActive.id.substring(0, 8)}). Consulte-la avant d'en créer une autre.`,
+        );
+      }
+    }
+
     // Taux en Decimal pour zéro perte d'arrondi.
     const feeProduct = new Prisma.Decimal(
       this.config.get<string>('SERVICE_FEE_PRODUCT') ?? String(DEFAULT_SERVICE_FEE_PRODUCT),
@@ -551,6 +578,14 @@ export class OrdersService {
         transactions: true,
         escrow_conditions: true,
         disputes: true,
+        // Joins user pour avoir nom + photo de l'acheteur et du vendeur
+        // côté UI sans n+1 query mobile.
+        users_commandes_vente_buyer_idTousers: {
+          select: { id: true, full_name: true, photo_url: true },
+        },
+        users_commandes_vente_seller_idTousers: {
+          select: { id: true, full_name: true, photo_url: true },
+        },
       },
     });
     if (!order) throw new NotFoundException('Commande introuvable.');

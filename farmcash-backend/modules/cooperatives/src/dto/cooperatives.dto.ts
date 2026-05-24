@@ -290,6 +290,75 @@ export class ValidatePrevisionDto {
 }
 
 // ---------------------------------------------------------------------
+//  Membres gérés par la coop (« farmer sans téléphone »)
+//  ---------------------------------------------------------------------
+//  Permet à une coopérative d'enregistrer un producteur qui n'a PAS de
+//  téléphone (cas fréquent zones rurales) — la coop publie/vend en son
+//  nom via `act_as_farmer_id` sur les annonces. Plus tard, quand le
+//  farmer obtient un téléphone, la coop peut le « promouvoir » en
+//  farmer autonome (passage à un compte normal avec auth OTP+PIN).
+// ---------------------------------------------------------------------
+
+export class CreateManagedMemberDto {
+  @ApiProperty({
+    example: 'Aïssata Touré',
+    description: 'Nom complet du producteur — affiché aux acheteurs',
+  })
+  @IsString()
+  @IsNotEmpty()
+  @Length(2, 150)
+  full_name: string;
+
+  /**
+   * Village ou hameau d'origine du producteur. Stocké tel quel
+   * (texte libre) car les villages de brousse ne sont pas tous dans
+   * le référentiel `villes_ci`. Sert d'indication de localisation à
+   * la coop et à l'acheteur final.
+   */
+  @ApiPropertyOptional({
+    example: 'Kongasso, Korhogo Nord',
+    description: 'Village/hameau (texte libre, optionnel — VARCHAR 100 en DB)',
+  })
+  @IsOptional()
+  @IsString()
+  @Length(0, 100)
+  village?: string;
+
+  /**
+   * Produit principal cultivé — pré-remplit le formulaire de création
+   * d'annonce quand la coop publie pour ce farmer. Optionnel.
+   */
+  @ApiPropertyOptional({ description: 'UUID du produit cultivé par défaut' })
+  @IsOptional()
+  @IsUUID()
+  default_product_id?: string;
+
+  @ApiPropertyOptional({
+    description: 'URL de la photo du producteur (optionnel)',
+  })
+  @IsOptional()
+  @IsString()
+  @Length(0, 500)
+  photo_url?: string;
+}
+
+export class PromoteManagedMemberDto {
+  /**
+   * Téléphone E.164 du farmer (le compte devient autonome).
+   * Validé contre la regex CI : +225 suivi de 10 chiffres.
+   * Le farmer pourra ensuite demander un OTP pour définir son PIN.
+   */
+  @ApiProperty({
+    example: '+2250701020304',
+    description: 'Téléphone E.164 CI à associer au compte (devient autonome)',
+  })
+  @IsString()
+  @IsNotEmpty()
+  @Length(10, 20)
+  phone: string;
+}
+
+// ---------------------------------------------------------------------
 //  Avance de paiement (coop → producteur)
 // ---------------------------------------------------------------------
 

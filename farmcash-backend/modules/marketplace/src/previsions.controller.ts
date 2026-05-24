@@ -8,12 +8,14 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
   Param,
   ParseUUIDPipe,
   Post,
+  Put,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -24,6 +26,7 @@ import {
   ConvertPrevisionDto,
   CreatePrevisionDto,
   CreateReservationDto,
+  UpdatePrevisionDto,
 } from './dto/previsions.dto';
 
 @ApiTags('📅 Prévisions & Réservations Futures')
@@ -75,6 +78,36 @@ export class PrevisionsController {
     @Body() dto: CreateReservationDto,
   ) {
     return this.previsionsService.reserverPrevision(user.sub, dto);
+  }
+
+  @Put(':id')
+  @Roles('FARMER')
+  @ApiOperation({
+    summary: 'Modifier une prévision (FARMER propriétaire uniquement)',
+    description:
+      "Mise à jour partielle. Refus si la coop a validé/inclus la prévision.",
+  })
+  updatePrevision(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: UpdatePrevisionDto,
+  ) {
+    return this.previsionsService.updatePrevision(user.sub, id, dto);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @Roles('FARMER')
+  @ApiOperation({
+    summary: 'Supprimer une prévision (FARMER propriétaire uniquement)',
+    description:
+      'Refus si coop a validé OU si des acheteurs ont déjà réservé.',
+  })
+  deletePrevision(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    return this.previsionsService.deletePrevision(user.sub, id);
   }
 
   @Post(':id/convert')

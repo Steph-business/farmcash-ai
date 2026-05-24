@@ -40,6 +40,9 @@ export class TreatmentsService {
       // Pour les array fields PostgreSQL, on utilise `has` (contient cette valeur).
       ...(query.disease && { maladies_cibles: { has: query.disease } }),
       ...(query.culture && { cultures_cibles: { has: query.culture } }),
+      // `is_bio` est nullable côté query — on ne filtre que s'il est
+      // explicitement renseigné (true OU false), pas en cas d'omission.
+      ...(query.is_bio !== undefined && { is_bio: query.is_bio }),
     };
 
     const [data, total] = await Promise.all([
@@ -124,6 +127,7 @@ export class TreatmentsService {
         dosage: dto.dosage,
         mode_application: dto.mode_application,
         delai_carence_j: dto.delai_carence_j,
+        is_bio: dto.is_bio ?? false,
       },
     });
   }
@@ -148,6 +152,7 @@ export class TreatmentsService {
         ...(dto.delai_carence_j !== undefined && {
           delai_carence_j: dto.delai_carence_j,
         }),
+        ...(dto.is_bio !== undefined && { is_bio: dto.is_bio }),
       },
     });
   }

@@ -248,6 +248,12 @@ export class AuthService {
       throw new UnauthorizedException('Compte désactivé. Contactez le support.');
     }
 
+    // Profil géré par une coop → pas d'authentification directe.
+    // Si phone=null, on n'arrive jamais ici (lookup par phone), mais on
+    // garde le garde-fou pour les cas tordus (phone restauré post-promotion
+    // mais managed_by_coop_id non nettoyé, ou attaque qui pousse un PIN).
+    this.assertNotManagedProfile(user);
+
     // Lock encore actif → on bloque sans même tester le PIN.
     if (user.locked_until && user.locked_until > new Date()) {
       const remaining = Math.ceil(
@@ -294,6 +300,21 @@ export class AuthService {
    *     silencieusement de brancher l'envoi.
    */
   async envoyerOtp(dto: EnvoyerOtpDto) {
+    // Garde-fou « farmer géré par coop » : si un user existe avec ce
+    // phone et qu'il a `managed_by_coop_id` non-NULL, on refuse l'OTP
+    // (pas d'authentification directe possible). En pratique le
+    // managed user n'a PAS de phone — mais on couvre le cas où le
+    // numéro a été restauré sans nettoyer le flag (sécurité défensive).
+    const existingUser = await this.prisma.users.findUnique({
+      where: { phone: dto.phone },
+      select: { managed_by_coop_id: true, phone: true },
+    });
+    if (existingUser?.managed_by_coop_id) {
+      throw new ForbiddenException(
+        "Ce profil est géré par une coopérative — pas d'authentification directe. Demandez à votre coop de vous promouvoir en compte autonome.",
+      );
+    }
+
     // Invalidation des OTP précédents non utilisés (purpose identique).
     await this.prisma.otps.updateMany({
       where: { phone: dto.phone, purpose: dto.purpose, is_used: false },
@@ -363,6 +384,9 @@ export class AuthService {
     if (!user.is_active) {
       throw new UnauthorizedException('Compte désactivé. Contactez le support.');
     }
+
+    // Profil géré par une coop → pas de tokens émis (cf. envoyerOtp).
+    this.assertNotManagedProfile(user);
 
     await this.prisma.users.update({
       where: { id: user.id },
@@ -1040,6 +1064,22 @@ export class AuthService {
         niveau: 'SUPER_ADMIN',
       };
     });
+  }
+
+  /**
+   * Garde-fou : rejette toute tentative d'authentification d'un compte
+   * marqué comme « géré par une coop » (managed_by_coop_id non-NULL).
+   *
+   * Ces comptes n'ont pas de téléphone ni de PIN — la coop publie/vend
+   * en leur nom. La promotion en compte autonome se fait via
+   * POST /coop/members/:id/promote.
+   */
+  private assertNotManagedProfile(user: { managed_by_coop_id?: string | null }): void {
+    if (user.managed_by_coop_id) {
+      throw new ForbiddenException(
+        "Ce profil est géré par une coopérative — pas d'authentification directe. Demandez à votre coop de vous promouvoir en compte autonome.",
+      );
+    }
   }
 
   /**

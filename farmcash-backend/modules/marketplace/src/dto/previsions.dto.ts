@@ -80,6 +80,44 @@ export class CreatePrevisionDto {
   assigned_to_cooperative_id?: string;
 }
 
+/**
+ * Body de PUT /marketplace/previsions/:id — modification par le FARMER
+ * propriétaire. Tous les champs sont optionnels (modification partielle).
+ *
+ * IMPORTANT : si la prévision est déjà `VALIDATED` ou `INCLUDED` côté
+ * coopérative, le service refuse la modification (la coop a la main).
+ */
+export class UpdatePrevisionDto {
+  @ApiPropertyOptional({ example: 6000 })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  quantite_prev_kg?: number;
+
+  @ApiPropertyOptional({ example: '2026-11-15' })
+  @IsOptional()
+  @IsDateString()
+  date_recolte_prev?: string;
+
+  @ApiPropertyOptional({ example: 1600 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  prix_cible_kg?: number;
+
+  @ApiPropertyOptional({ example: 'Saison des pluies 2026' })
+  @IsOptional()
+  @IsString()
+  @Length(2, 20)
+  saison?: string;
+
+  @ApiPropertyOptional({ example: 'Mise à jour suite à inspection' })
+  @IsOptional()
+  @IsString()
+  @Length(0, 1000)
+  notes?: string;
+}
+
 export class CreateReservationDto {
   @ApiProperty({ example: 'uuid-prevision' })
   @IsUUID()

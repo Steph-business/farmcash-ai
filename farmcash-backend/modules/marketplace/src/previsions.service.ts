@@ -32,6 +32,7 @@ import {
   ConvertPrevisionDto,
   CreatePrevisionDto,
   CreateReservationDto,
+  UpdatePrevisionDto,
 } from './dto/previsions.dto';
 
 @Injectable()
@@ -79,7 +80,42 @@ export class PrevisionsService {
   /**
    * Crée une prévision de récolte. La date prévue doit être future.
    */
+  /// Seuil minimum de score sous lequel un FARMER ne peut plus créer de
+  /// nouvelles prévisions. Empêche un farmer non-fiable de continuer à
+  /// piéger les acheteurs avec des promesses qu'il annule.
+  static readonly RELIABILITY_THRESHOLD_PREVISION = 40;
+
+  /// Pénalités appliquées au score selon la proximité de la date prévue
+  /// au moment où le farmer annule sa prévision. Plus l'annulation est
+  /// tardive, plus l'impact est lourd (les buyers ont planifié leur
+  /// business). Annuler très en avance reste à peu près sans pénalité.
+  static reliabilityPenaltyForDeletion(msUntilHarvest: number | null): number {
+    if (msUntilHarvest == null) return 1; // pas de date → légère pénalité
+    const DAY = 24 * 60 * 60 * 1000;
+    const days = msUntilHarvest / DAY;
+    if (days > 30) return 1;
+    if (days > 10) return 3;
+    if (days >= 3) return 5;
+    return 0; // < 3 jours = refusé en amont, jamais appliqué
+  }
+
   async createPrevision(farmerId: string, dto: CreatePrevisionDto) {
+    // Garde-fou : un farmer dont le score est tombé sous le seuil ne
+    // peut plus créer de nouvelles prévisions. Les buyers n'auraient
+    // plus confiance dans ses promesses → on protège la plateforme.
+    const farmer = await this.prisma.users.findUnique({
+      where: { id: farmerId },
+      select: { reliability_score: true },
+    });
+    if (
+      farmer &&
+      farmer.reliability_score < PrevisionsService.RELIABILITY_THRESHOLD_PREVISION
+    ) {
+      throw new ForbiddenException(
+        `Ton score de fiabilité est trop bas (${farmer.reliability_score}/100). Tu ne peux plus créer de prévisions pour le moment. Honore tes engagements actuels pour le faire remonter.`,
+      );
+    }
+
     if (dto.date_recolte_prev) {
       const target = new Date(dto.date_recolte_prev);
       if (target.getTime() <= Date.now()) {
@@ -124,12 +160,239 @@ export class PrevisionsService {
         coop_status: assignedCoopId ? 'PENDING' : null,
       },
     });
+    // Retour : entité prévision complète plutôt que `{ message, id }`.
+    // Le client mobile parse via `Prevision.fromJson` qui exige
+    // `farmer_id`/`produit_id`/`quantite_prev_kg` required — l'ancien
+    // shape minimal faisait crasher le parser freezed et laissait
+    // croire à un échec alors que la prévision était bien créée.
+    // Les champs `message` et `coop_status` sont conservés sur la même
+    // réponse pour conserver l'info workflow ; le parser mobile ignore
+    // les champs inconnus.
     return {
+      ...prevision,
       message: assignedCoopId
         ? 'Prévision confiée à votre coopérative (en attente de validation).'
         : 'Prévision de production ajoutée.',
-      id: prevision.id,
-      coop_status: assignedCoopId ? 'PENDING' : null,
+    };
+  }
+
+  /**
+   * Modification partielle d'une prévision par le FARMER propriétaire.
+   *
+   * Règles :
+   *   • Ownership : seul le `farmer_id` peut modifier sa prévision.
+   *   • Lock coop : si la coop a déjà VALIDATED ou INCLUDED la prévision
+   *     (elle l'a inspectée / intégrée à une publication agrégée), le
+   *     FARMER perd la main — c'est la coop qui pilote.
+   *   • PENDING (coop n'a pas encore décidé) : modification autorisée
+   *     mais on garde le statut PENDING (la coop revalidera).
+   *   • REJECTED ou null : modification autorisée librement.
+   *   • Si `date_recolte_prev` fournie, doit rester dans le futur.
+   */
+  async updatePrevision(
+    userId: string,
+    id: string,
+    dto: UpdatePrevisionDto,
+  ) {
+    const prevision = await this.prisma.previsions_production.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        farmer_id: true,
+        coop_status: true,
+      },
+    });
+    if (!prevision) throw new NotFoundException('Prévision introuvable.');
+    if (prevision.farmer_id !== userId) {
+      throw new ForbiddenException(
+        'Vous ne pouvez modifier que vos propres prévisions.',
+      );
+    }
+    if (
+      prevision.coop_status === 'VALIDATED' ||
+      prevision.coop_status === 'INCLUDED'
+    ) {
+      throw new ForbiddenException(
+        "Votre coopérative a déjà validé cette prévision — c'est elle qui la gère désormais. Contactez-la pour toute modification.",
+      );
+    }
+    if (dto.date_recolte_prev) {
+      const target = new Date(dto.date_recolte_prev);
+      if (target.getTime() <= Date.now()) {
+        throw new BadRequestException(
+          'La date de récolte prévue doit être dans le futur.',
+        );
+      }
+    }
+    const updated = await this.prisma.previsions_production.update({
+      where: { id },
+      data: {
+        ...(dto.quantite_prev_kg !== undefined && {
+          quantite_prev_kg: dto.quantite_prev_kg,
+        }),
+        ...(dto.date_recolte_prev !== undefined && {
+          date_recolte_prev: new Date(dto.date_recolte_prev),
+        }),
+        ...(dto.prix_cible_kg !== undefined && {
+          prix_cible_kg: dto.prix_cible_kg,
+        }),
+        ...(dto.saison !== undefined && { saison: dto.saison }),
+        ...(dto.notes !== undefined && { notes: dto.notes }),
+      },
+    });
+    return updated;
+  }
+
+  /**
+   * Suppression d'une prévision par le FARMER propriétaire.
+   *
+   * Règles :
+   *   • Ownership requis
+   *   • Refus si coop VALIDATED / INCLUDED (la coop pilote)
+   *
+   * Gestion des réservations buyer existantes :
+   *   • Pas de blocage → on rembourse AUTOMATIQUEMENT chaque acheteur.
+   *   • Pour chaque réservation active (status PENDING ou CONFIRMED) :
+   *       1. `finance.refundReservationDeposit(r.id)` → crédite le wallet
+   *          de l'acheteur du montant de l'acompte (passe de escrow à
+   *          balance disponible).
+   *       2. Marque la réservation comme CANCELLED.
+   *       3. Envoie une notification WALLET_CREDITED à l'acheteur
+   *          avec le détail du remboursement.
+   *   • Best-effort : si un remboursement échoue (cas exceptionnel),
+   *     on log et on continue avec les autres pour ne pas bloquer la
+   *     suppression. Un job de réconciliation peut rattraper plus tard.
+   *   • La prévision est ensuite supprimée physiquement.
+   */
+  async deletePrevision(userId: string, id: string) {
+    const prevision = await this.prisma.previsions_production.findUnique({
+      where: { id },
+      include: {
+        reservations_previsions: {
+          where: { status: { in: ['PENDING', 'CONFIRMED'] } },
+          select: {
+            id: true,
+            acheteur_id: true,
+            deposit_amount: true,
+            deposit_transaction_id: true,
+          },
+        },
+        produits_agricoles: { select: { nom: true } },
+      },
+    });
+    if (!prevision) throw new NotFoundException('Prévision introuvable.');
+    if (prevision.farmer_id !== userId) {
+      throw new ForbiddenException(
+        'Vous ne pouvez supprimer que vos propres prévisions.',
+      );
+    }
+    if (
+      prevision.coop_status === 'VALIDATED' ||
+      prevision.coop_status === 'INCLUDED'
+    ) {
+      throw new ForbiddenException(
+        "Votre coopérative a déjà validé cette prévision — elle ne peut plus être supprimée par vous.",
+      );
+    }
+    // Fenêtre temporelle : on bloque la suppression à moins de 3 jours
+    // avant la date prévue de récolte. Raison : les buyers ayant réservé
+    // ont planifié leur business sur cette date, leur tirer le tapis 48h
+    // avant détruirait la confiance dans la plateforme. Au-delà de J-3
+    // (ou si aucune date prévue), la suppression reste possible — avec
+    // refund automatique des acomptes.
+    if (prevision.date_recolte_prev) {
+      const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+      const msUntilHarvest =
+        prevision.date_recolte_prev.getTime() - Date.now();
+      if (msUntilHarvest < THREE_DAYS_MS) {
+        throw new ForbiddenException(
+          "Trop proche de la date de récolte (moins de 3 jours) — suppression impossible. Les acheteurs ont planifié leur business sur cette date.",
+        );
+      }
+    }
+
+    // Remboursement automatique de chaque acompte buyer encore actif.
+    const produitNom = prevision.produits_agricoles?.nom ?? 'récolte';
+    let refundedCount = 0;
+    let totalRefunded = 0;
+    for (const r of prevision.reservations_previsions) {
+      if (!r.deposit_transaction_id) {
+        // Pas de transaction d'acompte → aucun argent à rembourser.
+        // On marque juste la réservation comme CANCELLED.
+        await this.prisma.reservations_previsions.update({
+          where: { id: r.id },
+          data: { status: 'CANCELLED' },
+        });
+        continue;
+      }
+      try {
+        const result = await this.finance.refundReservationDeposit(r.id);
+        await this.prisma.reservations_previsions.update({
+          where: { id: r.id },
+          data: { status: 'CANCELLED' },
+        });
+        refundedCount += 1;
+        totalRefunded += Number(result.amount);
+        // Notif buyer — son acompte revient dans son wallet disponible.
+        await this.notifications
+          .create({
+            user_id: r.acheteur_id,
+            type: NotificationType.WALLET_CREDITED,
+            titre: 'Acompte remboursé',
+            body: `Le producteur a annulé sa prévision "${produitNom}". ${result.amount} F ont été crédités sur ton wallet.`,
+            reservation_id: r.id,
+          })
+          .catch((e) => {
+            this.logger.warn(
+              `Notif refund prevision KO buyer=${r.acheteur_id}: ${e}`,
+            );
+          });
+      } catch (e) {
+        // Refund individuel échoué : on logge mais on continue pour
+        // libérer le farmer. La réconciliation peut être manuelle.
+        this.logger.error(
+          `Refund reservation ${r.id} KO lors de deletePrevision ${id}: ${e}`,
+        );
+      }
+    }
+
+    // Application de la pénalité de score AVANT la suppression :
+    // on calcule l'impact à partir du temps restant avant la date prévue,
+    // on décrémente `users.reliability_score` (borné à 0).
+    const msUntilHarvest = prevision.date_recolte_prev
+      ? prevision.date_recolte_prev.getTime() - Date.now()
+      : null;
+    const penalty = PrevisionsService.reliabilityPenaltyForDeletion(
+      msUntilHarvest,
+    );
+    if (penalty > 0) {
+      await this.prisma.users.update({
+        where: { id: userId },
+        data: {
+          reliability_score: { decrement: penalty },
+        },
+      });
+      // Borner à 0 (PG ne fait pas de clamp). On relit, on patche si < 0.
+      const updated = await this.prisma.users.findUnique({
+        where: { id: userId },
+        select: { reliability_score: true },
+      });
+      if (updated && updated.reliability_score < 0) {
+        await this.prisma.users.update({
+          where: { id: userId },
+          data: { reliability_score: 0 },
+        });
+      }
+    }
+
+    await this.prisma.previsions_production.delete({ where: { id } });
+    return {
+      message: refundedCount > 0
+        ? `Prévision supprimée. ${refundedCount} acheteur(s) remboursé(s) (${totalRefunded.toFixed(0)} F au total).`
+        : 'Prévision supprimée.',
+      refunded_count: refundedCount,
+      total_refunded: totalRefunded,
+      reliability_penalty: penalty,
     };
   }
 

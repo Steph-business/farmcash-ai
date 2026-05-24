@@ -9,6 +9,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
   IsInt,
   IsNotEmpty,
@@ -18,6 +19,7 @@ import {
   Max,
   Min,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export enum TreatmentType {
   FONGICIDE = 'FONGICIDE',
@@ -77,6 +79,11 @@ export class CreateTreatmentDto {
   @Min(0)
   @Max(365)
   delai_carence_j?: number;
+
+  @ApiPropertyOptional({ description: 'Traitement utilisable en agriculture biologique' })
+  @IsOptional()
+  @IsBoolean()
+  is_bio?: boolean;
 }
 
 export class UpdateTreatmentDto {
@@ -122,6 +129,11 @@ export class UpdateTreatmentDto {
   @Min(0)
   @Max(365)
   delai_carence_j?: number;
+
+  @ApiPropertyOptional({ description: 'Traitement utilisable en agriculture biologique' })
+  @IsOptional()
+  @IsBoolean()
+  is_bio?: boolean;
 }
 
 export class ListTreatmentsQueryDto {
@@ -154,4 +166,15 @@ export class ListTreatmentsQueryDto {
   @IsOptional()
   @IsEnum(TreatmentType)
   type?: TreatmentType;
+
+  /**
+   * Filtre booléen côté query : `?is_bio=true` ne renvoie que les
+   * traitements marqués bio. `@Transform` convertit la chaîne du
+   * querystring (toujours `string` en HTTP) en vrai booléen.
+   */
+  @ApiPropertyOptional({ description: 'Ne retourne que les traitements bio' })
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  is_bio?: boolean;
 }

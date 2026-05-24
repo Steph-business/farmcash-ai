@@ -35,6 +35,7 @@ import {
   AggregatePublicationDto,
   CreateInvitationDto,
   CreateJoinRequestDto,
+  CreateManagedMemberDto,
   CreatePublicationCoopDto,
   HandleInvitationDto,
   HandleJoinRequestDto,
@@ -44,6 +45,7 @@ import {
   ListPendingAnnoncesQueryDto,
   ListerPublicationsCoopQueryDto,
   PayAdvanceDto,
+  PromoteManagedMemberDto,
   RejectAnnonceDto,
   UpdateMemberRoleDto,
   UpdatePublicationCoopDto,
@@ -214,6 +216,37 @@ export class CoopManagementController {
     @Body() dto: UpdateMemberRoleDto,
   ) {
     return this.service.updateMemberRole(user.cooperative_id ?? '', memberUserId, dto);
+  }
+
+  // -------------------------------------------------------------------
+  //  Membres GÉRÉS (farmer sans téléphone, supervisé par la coop)
+  // -------------------------------------------------------------------
+
+  @Post('members/managed')
+  @Roles('COOPERATIVE')
+  @ApiOperation({
+    summary:
+      "[COOP] Créer un producteur géré (sans téléphone, gestion intégrale par la coop)",
+  })
+  createManagedMember(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CreateManagedMemberDto,
+  ) {
+    return this.service.createManagedMember(user.sub, user.cooperative_id, dto);
+  }
+
+  @Post('members/:id/promote')
+  @Roles('COOPERATIVE')
+  @ApiOperation({
+    summary:
+      "[COOP] Promouvoir un membre géré en compte autonome (il obtient un téléphone)",
+  })
+  promoteManagedMember(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: PromoteManagedMemberDto,
+  ) {
+    return this.service.promoteManagedMember(user.sub, id, dto);
   }
 
   // -------------------------------------------------------------------

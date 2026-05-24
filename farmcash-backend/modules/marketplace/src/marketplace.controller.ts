@@ -121,10 +121,15 @@ export class MarketplaceController {
 
   @Post('annonces/vente')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('FARMER')
+  // FARMER classique = publication directe. COOPERATIVE = publication
+  // « au nom de » via act_as_farmer_id (cf. service : contrôles métier).
+  @Roles('FARMER', 'COOPERATIVE')
   @ApiBearerAuth()
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Publier une annonce de vente (FARMER)' })
+  @ApiOperation({
+    summary:
+      "Publier une annonce de vente (FARMER pour soi, COOPERATIVE pour un membre géré via act_as_farmer_id)",
+  })
   @ApiResponse({ status: 201 })
   createAnnonceVente(
     @CurrentUser() user: AuthenticatedUser,

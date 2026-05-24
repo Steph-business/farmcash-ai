@@ -35,12 +35,14 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@farmcash/database';
 import { NotificationsService, NotificationType } from '@farmcash/notifications';
+import { normalizePhone } from '@farmcash/shared';
 import {
   AggregatePublicationDto,
   CoopAnnonceStatus,
   CoopMemberRole,
   CreateInvitationDto,
   CreateJoinRequestDto,
+  CreateManagedMemberDto,
   CreatePublicationCoopDto,
   HandleInvitationDto,
   HandleJoinRequestDto,
@@ -50,6 +52,7 @@ import {
   ListPendingAnnoncesQueryDto,
   ListerPublicationsCoopQueryDto,
   PayAdvanceDto,
+  PromoteManagedMemberDto,
   RejectAnnonceDto,
   UpdateMemberRoleDto,
   UpdatePublicationCoopDto,
@@ -482,6 +485,250 @@ export class CooperativesService {
     });
   }
 
+  // ===================================================================
+  //  MEMBRES GÉRÉS — farmer sans téléphone, supervisé par la coop
+  // ===================================================================
+  //  Ces méthodes implémentent le flow « la coop enregistre un farmer
+  //  qui n'a pas de téléphone » :
+  //
+  //   1. createManagedMember : la coop crée un user FARMER sans phone
+  //      ni PIN, marqué `managed_by_coop_id = <coop user_id>` →
+  //      pas d'authentification possible. La coop publie/vend en son
+  //      nom (cf. marketplace.service.createAnnonceVente +
+  //      act_as_farmer_id).
+  //
+  //   2. promoteManagedMember : quand le farmer obtient un téléphone,
+  //      la coop renseigne le numéro → le compte devient autonome
+  //      (managed_by_coop_id = NULL). Le farmer peut alors demander
+  //      un OTP pour définir son PIN et se connecter normalement.
+  // ===================================================================
+
+  /**
+   * Crée un user FARMER géré par la coopérative courante :
+   *   • role = FARMER, phone = NULL (pas d'auth possible)
+   *   • managed_by_coop_id = <user_id de la coop>
+   *   • tutor_user_id      = <user_id de la coop> (audit)
+   *   • is_verified = false (pas d'OTP), pin_hash = NULL
+   *   • cooperative_id = id de la coop (devient de facto membre)
+   *
+   * Crée également la ligne `cooperative_members` (status MEMBER) si
+   * absente. Si le coop staff a fourni un `default_product_id`, le
+   * produit est validé contre le catalogue mais n'est PAS stocké sur
+   * l'user (pas de colonne dédiée). Il sera réutilisable côté UI via
+   * un raccourci de pré-remplissage à la création d'annonce.
+   */
+  async createManagedMember(
+    coopUserId: string,
+    coopProfileId: string | null,
+    dto: CreateManagedMemberDto,
+  ) {
+    // Le user appelant doit être un COOPERATIVE avec un profil coop.
+    // coopProfileId est null si l'extraction JWT a échoué (compte mal
+    // configuré). On ré-extrait depuis la DB pour être sûr.
+    let coopProfile = coopProfileId
+      ? await this.prisma.cooperative_profiles.findUnique({
+          where: { id: coopProfileId },
+          select: { id: true, nom: true, user_id: true },
+        })
+      : null;
+    if (!coopProfile) {
+      coopProfile = await this.prisma.cooperative_profiles.findUnique({
+        where: { user_id: coopUserId },
+        select: { id: true, nom: true, user_id: true },
+      });
+    }
+    if (!coopProfile) {
+      throw new ForbiddenException(
+        "Compte non rattaché à une coopérative — impossible d'enregistrer un membre géré.",
+      );
+    }
+
+    // Si default_product_id fourni, on vérifie qu'il existe dans le
+    // catalogue (sécurité : pas de FK orpheline côté UI).
+    if (dto.default_product_id) {
+      const produit = await this.prisma.produits_agricoles.findUnique({
+        where: { id: dto.default_product_id },
+        select: { id: true },
+      });
+      if (!produit) {
+        throw new BadRequestException(
+          `Produit ${dto.default_product_id} introuvable dans le catalogue.`,
+        );
+      }
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Crée le user FARMER géré (pas de phone, pas de PIN)
+      const user = await tx.users.create({
+        data: {
+          full_name: dto.full_name,
+          role: 'FARMER',
+          phone: null, // pas d'auth possible
+          pin_hash: null,
+          is_verified: false,
+          managed_by_coop_id: coopUserId,
+          tutor_user_id: coopUserId,
+          cooperative_id: coopProfile!.id,
+          photo_url: dto.photo_url ?? null,
+        },
+      });
+
+      // 2. Crée le profil étendu producteur (lignée minimale)
+      await tx.producteur_profiles.create({
+        data: {
+          user_id: user.id,
+          coop_id: coopProfile!.id,
+          est_membre_coop: true,
+          village_libre: dto.village,
+        },
+      });
+
+      // 3. Crée le lien membership (status MEMBER, actif)
+      //    On vérifie d'abord qu'il n'existe pas déjà (sécurité — un
+      //    nouvel user ne devrait jamais avoir de membership mais on
+      //    reste défensif).
+      const existingMembership = await tx.cooperative_members.findFirst({
+        where: {
+          cooperative_id: coopProfile!.id,
+          member_id: user.id,
+          is_active: true,
+        },
+      });
+      if (!existingMembership) {
+        await tx.cooperative_members.create({
+          data: {
+            cooperative_id: coopProfile!.id,
+            member_id: user.id,
+            role_in_coop: CoopMemberRole.MEMBER,
+            date_adhesion: new Date(),
+            is_active: true,
+          },
+        });
+      }
+
+      return user;
+    }).then((user) => {
+      this.logger.log(
+        `Membre géré créé : ${coopProfile!.nom} → user=${user.id} (${dto.full_name})`,
+      );
+      return {
+        id: user.id,
+        full_name: user.full_name,
+        role: user.role,
+        managed_by_coop_id: user.managed_by_coop_id,
+        tutor_user_id: user.tutor_user_id,
+        cooperative_id: user.cooperative_id,
+        photo_url: user.photo_url,
+        created_at: user.created_at,
+        default_product_id: dto.default_product_id ?? null,
+        village: dto.village ?? null,
+      };
+    });
+  }
+
+  /**
+   * Promeut un membre géré en farmer autonome :
+   *   • Vérifie que l'appelant (coop) est bien celui qui le gère
+   *     (managed_by_coop_id === coopUserId)
+   *   • Vérifie que target.phone est NULL (sinon il est déjà autonome)
+   *   • Normalise et valide le téléphone (libphonenumber-js, format CI)
+   *   • Vérifie l'unicité (aucun autre user avec ce phone)
+   *   • Update : phone = newPhone, managed_by_coop_id = NULL,
+   *     tutor_user_id = NULL
+   *
+   * À ce stade le user n'a toujours pas de PIN — il peut désormais
+   * demander un OTP via /auth/otp/send pour ensuite définir son PIN.
+   */
+  async promoteManagedMember(
+    coopUserId: string,
+    targetUserId: string,
+    dto: PromoteManagedMemberDto,
+  ) {
+    // 1. Charge la cible
+    const target = await this.prisma.users.findUnique({
+      where: { id: targetUserId },
+      select: {
+        id: true,
+        full_name: true,
+        phone: true,
+        role: true,
+        managed_by_coop_id: true,
+        tutor_user_id: true,
+      },
+    });
+    if (!target) {
+      throw new NotFoundException('Producteur géré introuvable.');
+    }
+
+    // 2. Sécurité : seule la coop qui gère ce farmer peut le promouvoir
+    if (target.managed_by_coop_id !== coopUserId) {
+      throw new ForbiddenException(
+        "Ce producteur n'est pas géré par votre coopérative.",
+      );
+    }
+
+    // 3. Si phone déjà renseigné → déjà autonome
+    if (target.phone) {
+      throw new ConflictException(
+        'Ce producteur est déjà autonome (téléphone déjà renseigné).',
+      );
+    }
+
+    // 4. Validation du format téléphone (E.164 via libphonenumber-js,
+    //    avec fallback CI). On reste cohérent avec auth.service.inscrire.
+    const phone = normalizePhone(dto.phone, 'CI');
+    if (!phone) {
+      throw new BadRequestException(
+        'Numéro de téléphone invalide. Format attendu : +225XXXXXXXXXX.',
+      );
+    }
+
+    // 5. Unicité : aucun autre user (peu importe son rôle) ne doit
+    //    déjà utiliser ce numéro. Le UNIQUE en DB protège aussi mais
+    //    on lève un message clair plutôt qu'une erreur Prisma P2002.
+    const existing = await this.prisma.users.findUnique({
+      where: { phone },
+      select: { id: true },
+    });
+    if (existing && existing.id !== targetUserId) {
+      throw new ConflictException(
+        'Ce numéro de téléphone est déjà utilisé par un autre compte.',
+      );
+    }
+
+    // 6. Promotion : on coupe les liens de gestion + on pose le phone.
+    //    Le PIN reste NULL → le farmer devra passer par OTP → définir-pin
+    //    pour se connecter ensuite.
+    const updated = await this.prisma.users.update({
+      where: { id: targetUserId },
+      data: {
+        phone,
+        managed_by_coop_id: null,
+        tutor_user_id: null,
+      },
+      select: {
+        id: true,
+        full_name: true,
+        phone: true,
+        role: true,
+        cooperative_id: true,
+        is_verified: true,
+        managed_by_coop_id: true,
+        tutor_user_id: true,
+      },
+    });
+
+    this.logger.log(
+      `Membre géré promu en autonome : coop_user=${coopUserId} → farmer=${targetUserId} (${phone})`,
+    );
+
+    return {
+      ...updated,
+      message:
+        'Producteur promu en autonome. Il peut désormais demander un OTP puis définir son PIN.',
+    };
+  }
+
   /** [COOP] change le rôle d'un membre (promotion GERANT/TRESORIER/MEMBER) */
   async updateMemberRole(
     coopId: string,
@@ -677,6 +924,40 @@ export class CooperativesService {
         rejected_reason: dto.rejection_reason,
       },
     });
+  }
+
+  /**
+   * Vérifie qu'un farmer est géré par la coop appelante. Lève une
+   * ForbiddenException sinon. Retourne le farmer (light payload) si OK.
+   *
+   * Utilisé par marketplace.service quand une COOP publie une annonce
+   * « au nom de » un farmer géré (champ `act_as_farmer_id`).
+   */
+  async assertFarmerManagedByCoop(coopUserId: string, farmerId: string) {
+    const farmer = await this.prisma.users.findUnique({
+      where: { id: farmerId },
+      select: {
+        id: true,
+        role: true,
+        phone: true,
+        managed_by_coop_id: true,
+        cooperative_id: true,
+      },
+    });
+    if (!farmer) {
+      throw new NotFoundException('Producteur géré introuvable.');
+    }
+    if (farmer.role !== 'FARMER') {
+      throw new ForbiddenException(
+        "Le compte cible n'est pas un producteur (FARMER).",
+      );
+    }
+    if (farmer.managed_by_coop_id !== coopUserId) {
+      throw new ForbiddenException(
+        "Ce producteur n'est pas géré par votre coopérative.",
+      );
+    }
+    return farmer;
   }
 
   /**
